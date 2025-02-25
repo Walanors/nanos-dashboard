@@ -6,6 +6,7 @@
     "dev": "ts-node --transpile-only src/server/index.ts",
     "build": "next build",
     "start": "cross-env NODE_ENV=production node server.js",
+    "stop": "node scripts/stop.js",
     "setup": "bash setup.sh"
   },
   "dependencies": {
