@@ -2,7 +2,7 @@
 # quick-install.sh - One-command installation script for Nanos Dashboard
 
 # Default configuration
-REPO_URL="https://github.com/yourusername/nanos-dashboard.git"
+REPO_URL="https://github.com/Walanors/nanos-dashboard.git"
 INSTALL_DIR="/opt/nanos-dashboard"
 DOMAIN=""
 USERNAME="admin"
