@@ -57,6 +57,34 @@ sudo npm install -g next
 # npx next build >> "$LOG_FILE" 2>&1
 ```
 
+#### "Killed" Error During npm install
+
+If you see `Killed` during the npm install process, it's likely due to memory constraints. Try these solutions:
+
+```bash
+# Create a swap file (if you have root access)
+sudo fallocate -l 2G /swapfile
+sudo chmod 600 /swapfile
+sudo mkswap /swapfile
+sudo swapon /swapfile
+echo '/swapfile none swap sw 0 0' | sudo tee -a /etc/fstab
+
+# Then try installing again with reduced memory usage
+npm install --no-optional --no-fund --no-audit
+```
+
+#### Build Process Taking Too Long or Failing
+
+If the build process is taking too long or failing:
+
+```bash
+# Increase Node.js memory limit
+export NODE_OPTIONS="--max-old-space-size=4096"
+
+# Then run the build with verbose output
+npx next build --verbose
+```
+
 #### SSL Certificate Issues
 
 If you have SSL certificate issues, you can fix them with:

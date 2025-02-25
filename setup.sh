@@ -17,6 +17,51 @@ log() {
   echo "[$(date '+%Y-%m-%d %H:%M:%S')] $1" | tee -a "$LOG_FILE"
 }
 
+# Function to show a spinner for long-running processes
+spinner() {
+  local pid=$1
+  local delay=0.1
+  local spinstr='|/-\'
+  local start_time=$(date +%s)
+  
+  # Display the spinner while the process is running
+  while ps -p $pid > /dev/null; do
+    local temp=${spinstr#?}
+    printf " [%c] " "$spinstr"
+    local spinstr=$temp${spinstr%"$temp"}
+    sleep $delay
+    printf "\b\b\b\b\b"
+    
+    # Show elapsed time every 5 seconds
+    local current_time=$(date +%s)
+    local elapsed=$((current_time - start_time))
+    if [ $((elapsed % 5)) -eq 0 ]; then
+      printf "\rRunning... %ds " $elapsed
+    fi
+  done
+  printf "    \b\b\b\b"
+}
+
+# Function to run a command with a spinner
+run_with_spinner() {
+  local message="$1"
+  local command="$2"
+  
+  log "$message"
+  eval "$command" &
+  spinner $!
+  wait $!
+  local exit_code=$?
+  
+  if [ $exit_code -eq 0 ]; then
+    log "✅ Command completed successfully."
+  else
+    log "⚠️  Command exited with code $exit_code."
+  fi
+  
+  return $exit_code
+}
+
 # Function to display usage
 usage() {
   echo "Usage: $0 [OPTIONS]"
@@ -115,10 +160,44 @@ fi
 
 # Install production dependencies
 log "📦 Installing dependencies..."
+# Create a swap file if memory is low (less than 2GB)
+MEMORY_MB=$(free -m | awk '/^Mem:/{print $2}')
+if [ "$MEMORY_MB" -lt 2048 ]; then
+  log "   Low memory detected ($MEMORY_MB MB). Setting up swap file..."
+  if [ ! -f /swapfile ]; then
+    sudo fallocate -l 2G /swapfile
+    sudo chmod 600 /swapfile
+    sudo mkswap /swapfile
+    sudo swapon /swapfile
+    echo '/swapfile none swap sw 0 0' | sudo tee -a /etc/fstab
+    log "   Swap file created and enabled."
+  else
+    log "   Swap file already exists."
+  fi
+fi
+
+# Install dependencies with progress feedback
 if [ "$NODE_ENV" = "production" ]; then
-  npm ci --only=production >> "$LOG_FILE" 2>&1
+  log "   Installing production dependencies..."
+  (npm ci --only=production --no-fund --no-audit --progress=true 2>&1 | grep -v "timing\|idealTree\|reify" | tee -a "$LOG_FILE") || {
+    log "⚠️  npm ci failed, trying with regular npm install..."
+    run_with_spinner "   Retrying with npm install..." "npm install --only=production --no-fund --no-audit --progress=true >> '$LOG_FILE' 2>&1"
+  }
 else
-  npm install >> "$LOG_FILE" 2>&1
+  log "   Installing all dependencies..."
+  (npm install --no-fund --no-audit --progress=true 2>&1 | grep -v "timing\|idealTree\|reify" | tee -a "$LOG_FILE") || {
+    log "⚠️  npm install failed, trying with --no-optional flag..."
+    run_with_spinner "   Retrying with --no-optional flag..." "npm install --no-optional --no-fund --no-audit --progress=true >> '$LOG_FILE' 2>&1"
+  }
+fi
+
+# Verify installation was successful
+if [ ! -d "node_modules" ]; then
+  log "❌ Failed to install dependencies. Please check your system resources and try again."
+  log "   You can try running 'npm install' manually."
+  exit 1
+else
+  log "✅ Dependencies installed successfully."
 fi
 
 # Configuration
@@ -186,10 +265,11 @@ if [ "$SETUP_SSL" = true ]; then
   log "🔒 Setting up SSL with Let's Encrypt for $domain..."
   
   # Stop any services that might be using port 80
-  sudo systemctl stop nginx 2>/dev/null
+  run_with_spinner "   Stopping services on port 80..." "systemctl stop nginx 2>/dev/null || true"
   
   # Get certificate
-  sudo certbot certonly --standalone --non-interactive --agree-tos --email admin@$domain -d $domain >> "$LOG_FILE" 2>&1
+  log "   Requesting certificate from Let's Encrypt..."
+  run_with_spinner "   Running certbot..." "certbot certonly --standalone --non-interactive --agree-tos --email admin@$domain -d $domain >> '$LOG_FILE' 2>&1"
   
   if [ $? -eq 0 ]; then
     ssl_enabled="true"
@@ -198,21 +278,19 @@ if [ "$SETUP_SSL" = true ]; then
     
     # Fix permissions for certificate files
     log "🔧 Setting proper permissions for SSL certificates..."
-    sudo chmod -R 755 /etc/letsencrypt/live/
-    sudo chmod -R 755 /etc/letsencrypt/archive/
+    run_with_spinner "   Updating certificate permissions..." "chmod -R 755 /etc/letsencrypt/live/ /etc/letsencrypt/archive/"
     
     # Create symbolic links if needed
     if [ ! -f "$ssl_cert_path" ] || [ ! -f "$ssl_key_path" ]; then
       log "🔄 Creating symbolic links for SSL certificates..."
-      sudo mkdir -p "/etc/letsencrypt/live/$domain/"
+      run_with_spinner "   Creating directory structure..." "mkdir -p /etc/letsencrypt/live/$domain/"
       
       # Find the actual certificate files
       cert_file=$(find /etc/letsencrypt/archive/ -name "fullchain*.pem" | sort -r | head -n 1)
       key_file=$(find /etc/letsencrypt/archive/ -name "privkey*.pem" | sort -r | head -n 1)
       
       if [ -n "$cert_file" ] && [ -n "$key_file" ]; then
-        sudo ln -sf "$cert_file" "$ssl_cert_path"
-        sudo ln -sf "$key_file" "$ssl_key_path"
+        run_with_spinner "   Creating certificate symlinks..." "ln -sf '$cert_file' '$ssl_cert_path' && ln -sf '$key_file' '$ssl_key_path'"
         log "✅ SSL certificate links created successfully!"
       else
         log "❌ Could not find certificate files. Continuing without SSL..."
@@ -241,33 +319,45 @@ SSL_KEY_PATH=$ssl_key_path
 EOL
 
 # Build the application
-if [ "$NODE_ENV" != "production" ]; then
-  log "🏗️  Building application..."
-  # Use npx to run next build directly instead of relying on npm scripts
-  npx next build >> "$LOG_FILE" 2>&1
+log "🔨 Building the application (this may take a while)..."
+export NODE_OPTIONS="--max-old-space-size=2048"
+log "   Setting Node.js memory limit to 2048 MB"
+
+run_with_spinner "   Building with Next.js..." "npx next build >> '$LOG_FILE' 2>&1"
+
+if [ $? -ne 0 ]; then
+  log "⚠️  Build failed with 2048 MB memory limit, trying with 4096 MB..."
+  export NODE_OPTIONS="--max-old-space-size=4096"
+  log "   Increased Node.js memory limit to 4096 MB"
+  
+  run_with_spinner "   Retrying build with increased memory..." "npx next build >> '$LOG_FILE' 2>&1"
   
   if [ $? -ne 0 ]; then
-    log "❌ Build failed. Check $LOG_FILE for details."
-    log "   Trying to install Next.js globally and retry..."
-    
-    # Try to install Next.js globally and retry
-    sudo npm install -g next >> "$LOG_FILE" 2>&1
-    next build >> "$LOG_FILE" 2>&1
+    log "⚠️  Build failed again. Attempting to install Next.js globally and retry..."
+    run_with_spinner "   Installing Next.js globally..." "npm install -g next >> '$LOG_FILE' 2>&1"
+    run_with_spinner "   Retrying build with global Next.js..." "next build >> '$LOG_FILE' 2>&1"
     
     if [ $? -ne 0 ]; then
-      log "❌ Build still failed. Please check $LOG_FILE for details."
-      exit 1
+      log "❌ Build failed after multiple attempts. Check the log file at $LOG_FILE for details."
+      read -p "   Continue installation without building? (y/n): " continue_without_build
+      if [ "$continue_without_build" != "y" ]; then
+        log "❌ Installation aborted by user."
+        exit 1
+      fi
+      log "⚠️  Continuing installation without building. You will need to build manually later."
     else
-      log "✅ Build succeeded after installing Next.js globally."
+      log "✅ Build completed successfully with global Next.js."
     fi
+  else
+    log "✅ Build completed successfully with 4096 MB memory limit."
   fi
+else
+  log "✅ Build completed successfully with 2048 MB memory limit."
 fi
 
-# Create systemd service for auto-start
-log "🔄 Setting up systemd service..."
-SERVICE_FILE="/etc/systemd/system/nanos-dashboard.service"
-
-sudo bash -c "cat > $SERVICE_FILE" << EOL
+# Create systemd service
+log "🔧 Creating systemd service..."
+cat > /tmp/nanos-dashboard.service << EOF
 [Unit]
 Description=Nanos Dashboard
 After=network.target
@@ -276,72 +366,50 @@ After=network.target
 Type=simple
 User=$USER
 WorkingDirectory=$INSTALL_DIR
+Environment="NODE_ENV=production"
+Environment="PORT=$port"
+Environment="ADMIN_USERNAME=$username"
+Environment="ADMIN_PASSWORD=$password"
+Environment="ALLOWED_ORIGINS=$origins"
+Environment="SSL_ENABLED=$ssl_enabled"
 ExecStart=$(which node) server.js
 Restart=on-failure
-Environment=NODE_ENV=production
 
 [Install]
 WantedBy=multi-user.target
-EOL
+EOF
 
-# Reload systemd, enable and start service
-log "🚀 Starting service..."
-sudo systemctl daemon-reload >> "$LOG_FILE" 2>&1
-sudo systemctl enable nanos-dashboard.service >> "$LOG_FILE" 2>&1
-sudo systemctl start nanos-dashboard.service >> "$LOG_FILE" 2>&1
+run_with_spinner "   Installing service file..." "cp /tmp/nanos-dashboard.service /etc/systemd/system/"
+run_with_spinner "   Reloading systemd daemon..." "systemctl daemon-reload"
+run_with_spinner "   Enabling nanos-dashboard service..." "systemctl enable nanos-dashboard.service"
 
-# Check if service started successfully
+# Start the service
+log "🚀 Starting nanos-dashboard service..."
+run_with_spinner "   Starting service..." "systemctl start nanos-dashboard.service"
+
+# Check if service is running
 sleep 2
-if sudo systemctl is-active --quiet nanos-dashboard.service; then
-  log "✅ Service started successfully!"
+if systemctl is-active --quiet nanos-dashboard.service; then
+  log "✅ Nanos Dashboard service is running!"
 else
-  log "⚠️  Service may have failed to start. Checking logs..."
-  sudo systemctl status nanos-dashboard.service >> "$LOG_FILE" 2>&1
-  log "   Check full logs with: sudo journalctl -u nanos-dashboard.service"
-  
-  # Try to fix common issues
-  log "🔧 Attempting to fix common issues..."
-  
-  # Check if port is already in use
-  if netstat -tuln | grep ":$port " > /dev/null; then
-    log "⚠️  Port $port is already in use. Stopping conflicting service..."
-    sudo fuser -k $port/tcp >> "$LOG_FILE" 2>&1
-    sleep 2
-    sudo systemctl start nanos-dashboard.service >> "$LOG_FILE" 2>&1
-  fi
-  
-  # Check SSL certificate permissions again
-  if [ "$ssl_enabled" = "true" ]; then
-    log "🔧 Ensuring SSL certificates are readable..."
-    sudo chmod 644 "$ssl_cert_path" "$ssl_key_path" >> "$LOG_FILE" 2>&1
-    sudo systemctl restart nanos-dashboard.service >> "$LOG_FILE" 2>&1
-  fi
-  
-  # Check if service started after fixes
-  sleep 2
-  if sudo systemctl is-active --quiet nanos-dashboard.service; then
-    log "✅ Service started successfully after fixes!"
-  else
-    log "⚠️  Service still not starting. Please check logs for details."
-  fi
+  log "⚠️  Service may not have started properly. Check status with: systemctl status nanos-dashboard.service"
 fi
 
 # Clean up development files if in production
 if [ "$NODE_ENV" = "production" ]; then
   log "🧹 Cleaning up development files..."
-  rm -rf src/app/.next/cache
-  rm -rf node_modules/.cache
+  run_with_spinner "   Removing cache files..." "rm -rf src/app/.next/cache node_modules/.cache"
 fi
 
 # Automatic firewall configuration
 if command -v ufw > /dev/null; then
   log "🔥 Configuring firewall..."
-  sudo ufw allow $port/tcp >> "$LOG_FILE" 2>&1
+  run_with_spinner "   Adding port $port to firewall..." "ufw allow $port/tcp >> '$LOG_FILE' 2>&1"
   
   # Allow HTTP and HTTPS for Let's Encrypt
   if [ "$SETUP_SSL" = true ]; then
-    sudo ufw allow 80/tcp >> "$LOG_FILE" 2>&1
-    sudo ufw allow 443/tcp >> "$LOG_FILE" 2>&1
+    run_with_spinner "   Adding HTTP port to firewall..." "ufw allow 80/tcp >> '$LOG_FILE' 2>&1"
+    run_with_spinner "   Adding HTTPS port to firewall..." "ufw allow 443/tcp >> '$LOG_FILE' 2>&1"
   fi
   
   log "✅ Firewall rules added"
@@ -352,6 +420,7 @@ if [ "$SETUP_SSL" = true ]; then
   log "🔄 Setting up automatic SSL renewal..."
   
   # Create renewal script
+  log "   Creating SSL renewal script..."
   cat > renew-ssl.sh << EOL
 #!/bin/bash
 # SSL renewal script
@@ -373,9 +442,10 @@ systemctl restart nanos-dashboard.service
 echo "SSL certificates renewed at \$(date)"
 EOL
   
-  chmod +x renew-ssl.sh
+  run_with_spinner "   Making renewal script executable..." "chmod +x renew-ssl.sh"
   
   # Add to crontab to run twice daily (standard for Let's Encrypt)
+  log "   Adding renewal task to crontab..."
   (crontab -l 2>/dev/null; echo "0 0,12 * * * $INSTALL_DIR/renew-ssl.sh >> $INSTALL_DIR/ssl-renewal.log 2>&1") | crontab -
   
   log "✅ Automatic SSL renewal configured"
@@ -408,9 +478,10 @@ fi
 echo "Health check completed at \$(date)"
 EOL
 
-chmod +x health-check.sh
+run_with_spinner "   Making health check script executable..." "chmod +x health-check.sh"
 
 # Add health check to crontab
+log "   Adding health check to crontab..."
 (crontab -l 2>/dev/null; echo "*/15 * * * * $INSTALL_DIR/health-check.sh >> $INSTALL_DIR/health-check.log 2>&1") | crontab -
 
 log "✅ Health check script created and scheduled"
@@ -445,9 +516,9 @@ log "👤 Username: $username"
 log "🔑 Password: $password"
 log ""
 log "📝 Important commands:"
-log "   - Check service status: sudo systemctl status nanos-dashboard.service"
-log "   - Restart service: sudo systemctl restart nanos-dashboard.service"
-log "   - View logs: sudo journalctl -u nanos-dashboard.service"
+log "   - Check service status: systemctl status nanos-dashboard.service"
+log "   - Restart service: systemctl restart nanos-dashboard.service"
+log "   - View logs: journalctl -u nanos-dashboard.service"
 if [ "$ssl_enabled" = "true" ]; then
   log "   - Renew SSL manually: ./renew-ssl.sh"
 fi
@@ -456,6 +527,7 @@ log "   - Fix SSL permissions: sudo ./fix-ssl-permissions.sh $domain"
 log "======================================"
 
 # Add cleanup option for future use
+log "📦 Creating cleanup script for future optimization..."
 cat > cleanup.sh << EOL
 #!/bin/bash
 # Cleanup script to remove unnecessary development files after deployment
@@ -472,7 +544,7 @@ rm -rf next.config.js
 
 echo "Done! Your installation is now optimized for production."
 EOL
-chmod +x cleanup.sh
+run_with_spinner "   Making cleanup script executable..." "chmod +x cleanup.sh"
 
 log "✅ Created cleanup.sh script to remove unnecessary files when you're ready."
 log "   Run './cleanup.sh' after confirming everything works correctly."
