@@ -125,6 +125,31 @@ if [ "$SETUP_SSL" = true ]; then
     ssl_enabled="true"
     ssl_cert_path="/etc/letsencrypt/live/$domain/fullchain.pem"
     ssl_key_path="/etc/letsencrypt/live/$domain/privkey.pem"
+    
+    # Fix permissions for certificate files
+    log "🔧 Setting proper permissions for SSL certificates..."
+    sudo chmod -R 755 /etc/letsencrypt/live/
+    sudo chmod -R 755 /etc/letsencrypt/archive/
+    
+    # Create symbolic links if needed
+    if [ ! -f "$ssl_cert_path" ] || [ ! -f "$ssl_key_path" ]; then
+      log "🔄 Creating symbolic links for SSL certificates..."
+      sudo mkdir -p "/etc/letsencrypt/live/$domain/"
+      
+      # Find the actual certificate files
+      cert_file=$(find /etc/letsencrypt/archive/ -name "fullchain*.pem" | sort -r | head -n 1)
+      key_file=$(find /etc/letsencrypt/archive/ -name "privkey*.pem" | sort -r | head -n 1)
+      
+      if [ -n "$cert_file" ] && [ -n "$key_file" ]; then
+        sudo ln -sf "$cert_file" "$ssl_cert_path"
+        sudo ln -sf "$key_file" "$ssl_key_path"
+        log "✅ SSL certificate links created successfully!"
+      else
+        log "❌ Could not find certificate files. Continuing without SSL..."
+        ssl_enabled="false"
+      fi
+    fi
+    
     log "✅ SSL certificates obtained successfully!"
   else
     log "❌ Failed to obtain SSL certificates. Check $LOG_FILE for details."
@@ -188,7 +213,35 @@ sleep 2
 if sudo systemctl is-active --quiet nanos-dashboard.service; then
   log "✅ Service started successfully!"
 else
-  log "⚠️  Service may have failed to start. Check status with: sudo systemctl status nanos-dashboard.service"
+  log "⚠️  Service may have failed to start. Checking logs..."
+  sudo systemctl status nanos-dashboard.service >> "$LOG_FILE" 2>&1
+  log "   Check full logs with: sudo journalctl -u nanos-dashboard.service"
+  
+  # Try to fix common issues
+  log "🔧 Attempting to fix common issues..."
+  
+  # Check if port is already in use
+  if netstat -tuln | grep ":$port " > /dev/null; then
+    log "⚠️  Port $port is already in use. Stopping conflicting service..."
+    sudo fuser -k $port/tcp >> "$LOG_FILE" 2>&1
+    sleep 2
+    sudo systemctl start nanos-dashboard.service >> "$LOG_FILE" 2>&1
+  fi
+  
+  # Check SSL certificate permissions again
+  if [ "$ssl_enabled" = "true" ]; then
+    log "🔧 Ensuring SSL certificates are readable..."
+    sudo chmod 644 "$ssl_cert_path" "$ssl_key_path" >> "$LOG_FILE" 2>&1
+    sudo systemctl restart nanos-dashboard.service >> "$LOG_FILE" 2>&1
+  fi
+  
+  # Check if service started after fixes
+  sleep 2
+  if sudo systemctl is-active --quiet nanos-dashboard.service; then
+    log "✅ Service started successfully after fixes!"
+  else
+    log "⚠️  Service still not starting. Please check logs for details."
+  fi
 fi
 
 # Clean up development files if in production
@@ -227,6 +280,10 @@ systemctl stop nginx 2>/dev/null
 # Renew certificates
 certbot renew --quiet
 
+# Fix permissions
+chmod -R 755 /etc/letsencrypt/live/
+chmod -R 755 /etc/letsencrypt/archive/
+
 # Restart services
 systemctl start nginx 2>/dev/null
 systemctl restart nanos-dashboard.service
@@ -241,6 +298,40 @@ EOL
   
   log "✅ Automatic SSL renewal configured"
 fi
+
+# Create a health check script
+log "🔄 Creating health check script..."
+cat > health-check.sh << EOL
+#!/bin/bash
+# Health check script for Nanos Dashboard
+
+# Check if service is running
+if ! systemctl is-active --quiet nanos-dashboard.service; then
+  echo "Service is down, restarting..."
+  systemctl restart nanos-dashboard.service
+  
+  # Send notification (customize as needed)
+  # mail -s "Nanos Dashboard Restarted" admin@example.com <<< "The service was down and has been restarted at \$(date)"
+fi
+
+# Check if port is responding
+if ! curl -s http://localhost:$port >/dev/null; then
+  echo "Service not responding, restarting..."
+  systemctl restart nanos-dashboard.service
+  
+  # Send notification (customize as needed)
+  # mail -s "Nanos Dashboard Restarted" admin@example.com <<< "The service was not responding and has been restarted at \$(date)"
+fi
+
+echo "Health check completed at \$(date)"
+EOL
+
+chmod +x health-check.sh
+
+# Add health check to crontab
+(crontab -l 2>/dev/null; echo "*/15 * * * * $INSTALL_DIR/health-check.sh >> $INSTALL_DIR/health-check.log 2>&1") | crontab -
+
+log "✅ Health check script created and scheduled"
 
 # Final instructions
 log ""
@@ -261,6 +352,7 @@ log "   - View logs: sudo journalctl -u nanos-dashboard.service"
 if [ "$ssl_enabled" = "true" ]; then
   log "   - Renew SSL manually: ./renew-ssl.sh"
 fi
+log "   - Run health check manually: ./health-check.sh"
 log "======================================"
 
 # Add cleanup option for future use
