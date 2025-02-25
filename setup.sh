@@ -7,6 +7,7 @@ DEFAULT_USERNAME="admin"
 DEFAULT_PASSWORD=$(openssl rand -base64 12)
 INSTALL_DIR=$(pwd)
 LOG_FILE="install.log"
+AUTO_MODE=true  # Set to true for fully automatic installation
 
 # Function for logging
 log() {
@@ -55,24 +56,31 @@ fi
 
 # Configuration
 log "🔧 Setting up configuration..."
-log "   (Press Enter to accept default values)"
 
-read -p "Port number [$DEFAULT_PORT]: " port
-port=${port:-$DEFAULT_PORT}
-
-read -p "Admin username [$DEFAULT_USERNAME]: " username
-username=${username:-$DEFAULT_USERNAME}
-
-# Replace problematic read -s with stty-based approach
-echo -n "Admin password [$DEFAULT_PASSWORD]: "
-stty -echo
-read password
-stty echo
-echo # Add a newline after password input
-password=${password:-$DEFAULT_PASSWORD}
-
-read -p "Allowed origins (comma-separated) [http://localhost:$port]: " origins
-origins=${origins:-"http://localhost:$port"}
+# In automatic mode, use defaults without prompting
+if [ "$AUTO_MODE" = true ]; then
+  port=$DEFAULT_PORT
+  username=$DEFAULT_USERNAME
+  password=$DEFAULT_PASSWORD
+  origins="http://localhost:$port"
+  log "   Using default values:"
+  log "   - Port: $port"
+  log "   - Username: $username"
+  log "   - Password: [generated]"
+  log "   - Origins: $origins"
+else
+  # Interactive mode (original behavior)
+  log "   (Press Enter to accept default values)"
+  read -p "Port number [$DEFAULT_PORT]: " port
+  port=${port:-$DEFAULT_PORT}
+  read -p "Admin username [$DEFAULT_USERNAME]: " username
+  username=${username:-$DEFAULT_USERNAME}
+  read -p "Admin password [$DEFAULT_PASSWORD]: " -s password
+  echo ""
+  password=${password:-$DEFAULT_PASSWORD}
+  read -p "Allowed origins (comma-separated) [http://localhost:$port]: " origins
+  origins=${origins:-"http://localhost:$port"}
+fi
 
 # Create .env file
 log "📝 Creating environment configuration..."
@@ -107,7 +115,7 @@ After=network.target
 Type=simple
 User=$USER
 WorkingDirectory=$INSTALL_DIR
-ExecStart=$(which node) dist/server/index.js
+ExecStart=$(which node) server.js
 Restart=on-failure
 Environment=NODE_ENV=production
 
@@ -116,15 +124,18 @@ WantedBy=multi-user.target
 EOL
 
 # Reload systemd, enable and start service
-log "🔄 Setting up systemd service..."
+log "🚀 Starting service..."
 sudo systemctl daemon-reload >> "$LOG_FILE" 2>&1
 sudo systemctl enable nanos-dashboard.service >> "$LOG_FILE" 2>&1
-# Commented out the automatic start
-# sudo systemctl start nanos-dashboard.service >> "$LOG_FILE" 2>&1
+sudo systemctl start nanos-dashboard.service >> "$LOG_FILE" 2>&1
 
-# Check if service is enabled
-log "✅ Service has been enabled but not started."
-log "   To start the service manually, run: sudo systemctl start nanos-dashboard.service"
+# Check if service started successfully
+sleep 2
+if sudo systemctl is-active --quiet nanos-dashboard.service; then
+  log "✅ Service started successfully!"
+else
+  log "⚠️  Service may have failed to start. Check status with: sudo systemctl status nanos-dashboard.service"
+fi
 
 # Clean up development files if in production
 if [ "$NODE_ENV" = "production" ]; then
@@ -147,25 +158,36 @@ log "   - Restart service: sudo systemctl restart nanos-dashboard.service"
 log "   - View logs: sudo journalctl -u nanos-dashboard.service"
 log "======================================"
 
-# Optional: Open firewall port
+# Automatic firewall configuration
 if command -v ufw > /dev/null; then
-  read -p "Would you like to open the port $port in the firewall? (y/n) " open_port
-  if [[ $open_port == "y" || $open_port == "Y" ]]; then
+  if [ "$AUTO_MODE" = true ]; then
+    # Automatically open the port in firewall
     sudo ufw allow $port/tcp >> "$LOG_FILE" 2>&1
-    log "🔥 Firewall rule added for port $port"
+    log "🔥 Firewall rule automatically added for port $port"
+  else
+    # Interactive mode
+    read -p "Would you like to open the port $port in the firewall? (y/n) " open_port
+    if [[ $open_port == "y" || $open_port == "Y" ]]; then
+      sudo ufw allow $port/tcp >> "$LOG_FILE" 2>&1
+      log "🔥 Firewall rule added for port $port"
+    fi
   fi
 fi
 
-# Optional: Configure Nginx if installed
-if command -v nginx > /dev/null; then
-  read -p "Would you like to set up Nginx as a reverse proxy? (y/n) " setup_nginx
-  if [[ $setup_nginx == "y" || $setup_nginx == "Y" ]]; then
-    read -p "Enter domain name (e.g., dashboard.example.com): " domain_name
-    
-    if [ -z "$domain_name" ]; then
-      log "⚠️  No domain provided, skipping Nginx setup"
-    else
-      sudo bash -c "cat > /etc/nginx/sites-available/$domain_name" << EOL
+# Skip Nginx setup in automatic mode
+if [ "$AUTO_MODE" = true ]; then
+  log "ℹ️ Nginx setup skipped in automatic mode"
+else
+  # Original Nginx setup code
+  if command -v nginx > /dev/null; then
+    read -p "Would you like to set up Nginx as a reverse proxy? (y/n) " setup_nginx
+    if [[ $setup_nginx == "y" || $setup_nginx == "Y" ]]; then
+      read -p "Enter domain name (e.g., dashboard.example.com): " domain_name
+      
+      if [ -z "$domain_name" ]; then
+        log "⚠️  No domain provided, skipping Nginx setup"
+      else
+        sudo bash -c "cat > /etc/nginx/sites-available/$domain_name" << EOL
 server {
     listen 80;
     server_name $domain_name;
@@ -180,35 +202,36 @@ server {
     }
 }
 EOL
-      
-      sudo ln -s /etc/nginx/sites-available/$domain_name /etc/nginx/sites-enabled/ >> "$LOG_FILE" 2>&1
-      sudo nginx -t >> "$LOG_FILE" 2>&1
-      
-      if [ $? -eq 0 ]; then
-        sudo systemctl reload nginx >> "$LOG_FILE" 2>&1
-        log "✅ Nginx configured successfully!"
-        log "🌐 Dashboard is now available at: http://$domain_name"
         
-        # Ask about SSL
-        read -p "Would you like to secure with SSL using Let's Encrypt? (y/n) " setup_ssl
-        if [[ $setup_ssl == "y" || $setup_ssl == "Y" ]]; then
-          if ! command -v certbot > /dev/null; then
-            log "📦 Installing Certbot..."
-            sudo apt-get update >> "$LOG_FILE" 2>&1
-            sudo apt-get install -y certbot python3-certbot-nginx >> "$LOG_FILE" 2>&1
-          fi
+        sudo ln -s /etc/nginx/sites-available/$domain_name /etc/nginx/sites-enabled/ >> "$LOG_FILE" 2>&1
+        sudo nginx -t >> "$LOG_FILE" 2>&1
+        
+        if [ $? -eq 0 ]; then
+          sudo systemctl reload nginx >> "$LOG_FILE" 2>&1
+          log "✅ Nginx configured successfully!"
+          log "🌐 Dashboard is now available at: http://$domain_name"
           
-          sudo certbot --nginx -d $domain_name --non-interactive --agree-tos --email admin@$domain_name >> "$LOG_FILE" 2>&1
-          
-          if [ $? -eq 0 ]; then
-            log "🔒 SSL certificate installed successfully!"
-            log "🌐 Dashboard is now available at: https://$domain_name"
-          else
-            log "⚠️  SSL setup failed. Check $LOG_FILE for details."
+          # Ask about SSL
+          read -p "Would you like to secure with SSL using Let's Encrypt? (y/n) " setup_ssl
+          if [[ $setup_ssl == "y" || $setup_ssl == "Y" ]]; then
+            if ! command -v certbot > /dev/null; then
+              log "📦 Installing Certbot..."
+              sudo apt-get update >> "$LOG_FILE" 2>&1
+              sudo apt-get install -y certbot python3-certbot-nginx >> "$LOG_FILE" 2>&1
+            fi
+            
+            sudo certbot --nginx -d $domain_name --non-interactive --agree-tos --email admin@$domain_name >> "$LOG_FILE" 2>&1
+            
+            if [ $? -eq 0 ]; then
+              log "🔒 SSL certificate installed successfully!"
+              log "🌐 Dashboard is now available at: https://$domain_name"
+            else
+              log "⚠️  SSL setup failed. Check $LOG_FILE for details."
+            fi
           fi
+        else
+          log "⚠️  Nginx configuration test failed. Check syntax and try again."
         fi
-      else
-        log "⚠️  Nginx configuration test failed. Check syntax and try again."
       fi
     fi
   fi
