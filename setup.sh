@@ -243,11 +243,23 @@ EOL
 # Build the application
 if [ "$NODE_ENV" != "production" ]; then
   log "🏗️  Building application..."
-  npm run build >> "$LOG_FILE" 2>&1
+  # Use npx to run next build directly instead of relying on npm scripts
+  npx next build >> "$LOG_FILE" 2>&1
   
   if [ $? -ne 0 ]; then
     log "❌ Build failed. Check $LOG_FILE for details."
-    exit 1
+    log "   Trying to install Next.js globally and retry..."
+    
+    # Try to install Next.js globally and retry
+    sudo npm install -g next >> "$LOG_FILE" 2>&1
+    next build >> "$LOG_FILE" 2>&1
+    
+    if [ $? -ne 0 ]; then
+      log "❌ Build still failed. Please check $LOG_FILE for details."
+      exit 1
+    else
+      log "✅ Build succeeded after installing Next.js globally."
+    fi
   fi
 fi
 
