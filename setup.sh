@@ -116,18 +116,15 @@ WantedBy=multi-user.target
 EOL
 
 # Reload systemd, enable and start service
-log "🚀 Starting service..."
+log "🔄 Setting up systemd service..."
 sudo systemctl daemon-reload >> "$LOG_FILE" 2>&1
 sudo systemctl enable nanos-dashboard.service >> "$LOG_FILE" 2>&1
-sudo systemctl start nanos-dashboard.service >> "$LOG_FILE" 2>&1
+# Commented out the automatic start
+# sudo systemctl start nanos-dashboard.service >> "$LOG_FILE" 2>&1
 
-# Check if service started successfully
-sleep 2
-if sudo systemctl is-active --quiet nanos-dashboard.service; then
-  log "✅ Service started successfully!"
-else
-  log "⚠️  Service may have failed to start. Check status with: sudo systemctl status nanos-dashboard.service"
-fi
+# Check if service is enabled
+log "✅ Service has been enabled but not started."
+log "   To start the service manually, run: sudo systemctl start nanos-dashboard.service"
 
 # Clean up development files if in production
 if [ "$NODE_ENV" = "production" ]; then

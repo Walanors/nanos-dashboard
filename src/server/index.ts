@@ -70,6 +70,11 @@ app.prepare().then(() => {
     credentials: true
   }));
   
+  // Create allowed origins array
+  const allowedOrigins = process.env.ALLOWED_ORIGINS 
+    ? process.env.ALLOWED_ORIGINS.split(',') 
+    : ['*'];
+  
   // Configure Helmet CSP based on environment
   const scriptSrcDirectives = ["'self'", "'unsafe-inline'", "cdn.jsdelivr.net"];
   // Add unsafe-eval in development mode for Next.js hot reloading
@@ -81,13 +86,14 @@ app.prepare().then(() => {
     contentSecurityPolicy: {
       directives: {
         defaultSrc: ["'self'"],
-        scriptSrc: scriptSrcDirectives,
+        scriptSrc: ["'self'", "'unsafe-inline'", "cdn.jsdelivr.net"],
         styleSrc: ["'self'", "'unsafe-inline'", "cdn.jsdelivr.net"],
         imgSrc: ["'self'", "data:"],
-        connectSrc: ["'self'", "ws:", "wss:"], // Add WebSocket support
+        connectSrc: ["'self'", "ws:", "wss:", ...allowedOrigins],
         fontSrc: ["'self'", "cdn.jsdelivr.net"],
         objectSrc: ["'none'"],
-        frameSrc: ["'none'"]
+        frameSrc: ["'none'"],
+        formAction: ["'self'", ...allowedOrigins]
       }
     }
   }));
