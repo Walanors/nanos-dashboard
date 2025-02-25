@@ -5,16 +5,81 @@
 DEFAULT_PORT=3000
 DEFAULT_USERNAME="admin"
 DEFAULT_PASSWORD=$(openssl rand -base64 12)
+DEFAULT_DOMAIN="hetzner.nanosmanager.uk"
+DEFAULT_IP=$(hostname -I | awk '{print $1}')
 INSTALL_DIR=$(pwd)
 LOG_FILE="install.log"
 AUTO_MODE=true  # Set to true for fully automatic installation
-DEFAULT_DOMAIN="hetzner.nanosmanager.uk"  # Default domain
 SETUP_SSL=true  # Enable SSL setup by default
 
 # Function for logging
 log() {
   echo "[$(date '+%Y-%m-%d %H:%M:%S')] $1" | tee -a "$LOG_FILE"
 }
+
+# Function to display usage
+usage() {
+  echo "Usage: $0 [OPTIONS]"
+  echo "Options:"
+  echo "  --domain DOMAIN       Domain name (default: $DEFAULT_DOMAIN)"
+  echo "  --ip IP               Server IP address (default: auto-detected)"
+  echo "  --port PORT           Port number (default: $DEFAULT_PORT)"
+  echo "  --username USERNAME   Admin username (default: $DEFAULT_USERNAME)"
+  echo "  --password PASSWORD   Admin password (default: randomly generated)"
+  echo "  --ssl BOOL            Enable SSL setup (true/false, default: $SETUP_SSL)"
+  echo "  --interactive         Run in interactive mode (default: automatic)"
+  echo "  --help                Display this help message"
+  echo ""
+  echo "Example:"
+  echo "  $0 --domain example.com --port 3000 --username admin --password secret --ssl true"
+  exit 1
+}
+
+# Parse command line arguments
+while [[ $# -gt 0 ]]; do
+  key="$1"
+  case $key in
+    --domain)
+      DEFAULT_DOMAIN="$2"
+      shift 2
+      ;;
+    --ip)
+      DEFAULT_IP="$2"
+      shift 2
+      ;;
+    --port)
+      DEFAULT_PORT="$2"
+      shift 2
+      ;;
+    --username)
+      DEFAULT_USERNAME="$2"
+      shift 2
+      ;;
+    --password)
+      DEFAULT_PASSWORD="$2"
+      shift 2
+      ;;
+    --ssl)
+      if [[ "$2" == "false" || "$2" == "0" ]]; then
+        SETUP_SSL=false
+      else
+        SETUP_SSL=true
+      fi
+      shift 2
+      ;;
+    --interactive)
+      AUTO_MODE=false
+      shift
+      ;;
+    --help)
+      usage
+      ;;
+    *)
+      log "⚠️  Unknown option: $1"
+      usage
+      ;;
+  esac
+done
 
 # Welcome message
 log "======================================"
@@ -65,16 +130,23 @@ if [ "$AUTO_MODE" = true ]; then
   username=$DEFAULT_USERNAME
   password=$DEFAULT_PASSWORD
   domain=$DEFAULT_DOMAIN
-  origins="http://localhost:$port,http://$domain:$port,https://$domain:$port"
-  log "   Using default values:"
+  ip=$DEFAULT_IP
+  origins="http://localhost:$port,http://$ip:$port,http://$domain:$port,https://$domain:$port"
+  log "   Using provided/default values:"
+  log "   - Domain: $domain"
+  log "   - IP: $ip"
   log "   - Port: $port"
   log "   - Username: $username"
-  log "   - Password: [generated]"
-  log "   - Domain: $domain"
+  log "   - Password: [secured]"
+  log "   - SSL Enabled: $SETUP_SSL"
   log "   - Origins: $origins"
 else
-  # Interactive mode (original behavior)
+  # Interactive mode
   log "   (Press Enter to accept default values)"
+  read -p "Domain name [$DEFAULT_DOMAIN]: " domain
+  domain=${domain:-$DEFAULT_DOMAIN}
+  read -p "Server IP [$DEFAULT_IP]: " ip
+  ip=${ip:-$DEFAULT_IP}
   read -p "Port number [$DEFAULT_PORT]: " port
   port=${port:-$DEFAULT_PORT}
   read -p "Admin username [$DEFAULT_USERNAME]: " username
@@ -82,10 +154,8 @@ else
   read -p "Admin password [$DEFAULT_PASSWORD]: " -s password
   echo ""
   password=${password:-$DEFAULT_PASSWORD}
-  read -p "Domain name [$DEFAULT_DOMAIN]: " domain
-  domain=${domain:-$DEFAULT_DOMAIN}
-  read -p "Allowed origins (comma-separated) [http://localhost:$port,http://$domain:$port,https://$domain:$port]: " origins
-  origins=${origins:-"http://localhost:$port,http://$domain:$port,https://$domain:$port"}
+  read -p "Allowed origins (comma-separated) [http://localhost:$port,http://$ip:$port,http://$domain:$port,https://$domain:$port]: " origins
+  origins=${origins:-"http://localhost:$port,http://$ip:$port,http://$domain:$port,https://$domain:$port"}
   read -p "Setup SSL with Let's Encrypt? (y/n) [y]: " setup_ssl_input
   if [[ $setup_ssl_input == "n" || $setup_ssl_input == "N" ]]; then
     SETUP_SSL=false
@@ -333,6 +403,23 @@ chmod +x health-check.sh
 
 log "✅ Health check script created and scheduled"
 
+# Create a configuration summary file
+log "📝 Creating configuration summary..."
+cat > installation-summary.json << EOL
+{
+  "installation_date": "$(date '+%Y-%m-%d %H:%M:%S')",
+  "domain": "$domain",
+  "ip": "$ip",
+  "port": $port,
+  "username": "$username",
+  "ssl_enabled": $ssl_enabled,
+  "service_name": "nanos-dashboard",
+  "install_directory": "$INSTALL_DIR",
+  "node_version": "$(node -v)",
+  "npm_version": "$(npm -v)"
+}
+EOL
+
 # Final instructions
 log ""
 log "======================================"
@@ -353,6 +440,7 @@ if [ "$ssl_enabled" = "true" ]; then
   log "   - Renew SSL manually: ./renew-ssl.sh"
 fi
 log "   - Run health check manually: ./health-check.sh"
+log "   - Fix SSL permissions: sudo ./fix-ssl-permissions.sh $domain"
 log "======================================"
 
 # Add cleanup option for future use
