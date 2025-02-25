@@ -8,6 +8,8 @@ DEFAULT_PASSWORD=$(openssl rand -base64 12)
 INSTALL_DIR=$(pwd)
 LOG_FILE="install.log"
 AUTO_MODE=true  # Set to true for fully automatic installation
+DEFAULT_DOMAIN="hetzner.nanosmanager.uk"  # Default domain
+SETUP_SSL=true  # Enable SSL setup by default
 
 # Function for logging
 log() {
@@ -62,11 +64,13 @@ if [ "$AUTO_MODE" = true ]; then
   port=$DEFAULT_PORT
   username=$DEFAULT_USERNAME
   password=$DEFAULT_PASSWORD
-  origins="http://localhost:$port"
+  domain=$DEFAULT_DOMAIN
+  origins="http://localhost:$port,http://$domain:$port,https://$domain:$port"
   log "   Using default values:"
   log "   - Port: $port"
   log "   - Username: $username"
   log "   - Password: [generated]"
+  log "   - Domain: $domain"
   log "   - Origins: $origins"
 else
   # Interactive mode (original behavior)
@@ -78,8 +82,54 @@ else
   read -p "Admin password [$DEFAULT_PASSWORD]: " -s password
   echo ""
   password=${password:-$DEFAULT_PASSWORD}
-  read -p "Allowed origins (comma-separated) [http://localhost:$port]: " origins
-  origins=${origins:-"http://localhost:$port"}
+  read -p "Domain name [$DEFAULT_DOMAIN]: " domain
+  domain=${domain:-$DEFAULT_DOMAIN}
+  read -p "Allowed origins (comma-separated) [http://localhost:$port,http://$domain:$port,https://$domain:$port]: " origins
+  origins=${origins:-"http://localhost:$port,http://$domain:$port,https://$domain:$port"}
+  read -p "Setup SSL with Let's Encrypt? (y/n) [y]: " setup_ssl_input
+  if [[ $setup_ssl_input == "n" || $setup_ssl_input == "N" ]]; then
+    SETUP_SSL=false
+  fi
+fi
+
+# Install Certbot if SSL is enabled
+if [ "$SETUP_SSL" = true ]; then
+  log "📦 Installing Certbot for SSL..."
+  sudo apt-get update >> "$LOG_FILE" 2>&1
+  sudo apt-get install -y certbot >> "$LOG_FILE" 2>&1
+  
+  # Verify installation
+  if ! command -v certbot > /dev/null; then
+    log "❌ Failed to install Certbot. SSL setup will be skipped."
+    SETUP_SSL=false
+  else
+    log "✅ Certbot installed: $(certbot --version)"
+  fi
+fi
+
+# Get SSL certificates if enabled
+ssl_enabled="false"
+ssl_cert_path=""
+ssl_key_path=""
+
+if [ "$SETUP_SSL" = true ]; then
+  log "🔒 Setting up SSL with Let's Encrypt for $domain..."
+  
+  # Stop any services that might be using port 80
+  sudo systemctl stop nginx 2>/dev/null
+  
+  # Get certificate
+  sudo certbot certonly --standalone --non-interactive --agree-tos --email admin@$domain -d $domain >> "$LOG_FILE" 2>&1
+  
+  if [ $? -eq 0 ]; then
+    ssl_enabled="true"
+    ssl_cert_path="/etc/letsencrypt/live/$domain/fullchain.pem"
+    ssl_key_path="/etc/letsencrypt/live/$domain/privkey.pem"
+    log "✅ SSL certificates obtained successfully!"
+  else
+    log "❌ Failed to obtain SSL certificates. Check $LOG_FILE for details."
+    log "   Continuing without SSL..."
+  fi
 fi
 
 # Create .env file
@@ -89,6 +139,10 @@ PORT=$port
 ADMIN_USERNAME=$username
 ADMIN_PASSWORD=$password
 ALLOWED_ORIGINS=$origins
+# SSL Configuration
+SSL_ENABLED=$ssl_enabled
+SSL_CERT_PATH=$ssl_cert_path
+SSL_KEY_PATH=$ssl_key_path
 EOL
 
 # Build the application
@@ -144,11 +198,59 @@ if [ "$NODE_ENV" = "production" ]; then
   rm -rf node_modules/.cache
 fi
 
+# Automatic firewall configuration
+if command -v ufw > /dev/null; then
+  log "🔥 Configuring firewall..."
+  sudo ufw allow $port/tcp >> "$LOG_FILE" 2>&1
+  
+  # Allow HTTP and HTTPS for Let's Encrypt
+  if [ "$SETUP_SSL" = true ]; then
+    sudo ufw allow 80/tcp >> "$LOG_FILE" 2>&1
+    sudo ufw allow 443/tcp >> "$LOG_FILE" 2>&1
+  fi
+  
+  log "✅ Firewall rules added"
+fi
+
+# Set up automatic SSL renewal
+if [ "$SETUP_SSL" = true ]; then
+  log "🔄 Setting up automatic SSL renewal..."
+  
+  # Create renewal script
+  cat > renew-ssl.sh << EOL
+#!/bin/bash
+# SSL renewal script
+
+# Stop services using port 80
+systemctl stop nginx 2>/dev/null
+
+# Renew certificates
+certbot renew --quiet
+
+# Restart services
+systemctl start nginx 2>/dev/null
+systemctl restart nanos-dashboard.service
+
+echo "SSL certificates renewed at \$(date)"
+EOL
+  
+  chmod +x renew-ssl.sh
+  
+  # Add to crontab to run twice daily (standard for Let's Encrypt)
+  (crontab -l 2>/dev/null; echo "0 0,12 * * * $INSTALL_DIR/renew-ssl.sh >> $INSTALL_DIR/ssl-renewal.log 2>&1") | crontab -
+  
+  log "✅ Automatic SSL renewal configured"
+fi
+
 # Final instructions
 log ""
 log "======================================"
 log "✅ Installation complete!"
-log "🌐 Dashboard is running at: http://localhost:$port"
+if [ "$ssl_enabled" = "true" ]; then
+  log "🌐 Dashboard is running at: https://$domain:$port"
+else
+  log "🌐 Dashboard is running at: http://$domain:$port"
+fi
 log "👤 Username: $username"
 log "🔑 Password: $password"
 log ""
@@ -156,86 +258,10 @@ log "📝 Important commands:"
 log "   - Check service status: sudo systemctl status nanos-dashboard.service"
 log "   - Restart service: sudo systemctl restart nanos-dashboard.service"
 log "   - View logs: sudo journalctl -u nanos-dashboard.service"
+if [ "$ssl_enabled" = "true" ]; then
+  log "   - Renew SSL manually: ./renew-ssl.sh"
+fi
 log "======================================"
-
-# Automatic firewall configuration
-if command -v ufw > /dev/null; then
-  if [ "$AUTO_MODE" = true ]; then
-    # Automatically open the port in firewall
-    sudo ufw allow $port/tcp >> "$LOG_FILE" 2>&1
-    log "🔥 Firewall rule automatically added for port $port"
-  else
-    # Interactive mode
-    read -p "Would you like to open the port $port in the firewall? (y/n) " open_port
-    if [[ $open_port == "y" || $open_port == "Y" ]]; then
-      sudo ufw allow $port/tcp >> "$LOG_FILE" 2>&1
-      log "🔥 Firewall rule added for port $port"
-    fi
-  fi
-fi
-
-# Skip Nginx setup in automatic mode
-if [ "$AUTO_MODE" = true ]; then
-  log "ℹ️ Nginx setup skipped in automatic mode"
-else
-  # Original Nginx setup code
-  if command -v nginx > /dev/null; then
-    read -p "Would you like to set up Nginx as a reverse proxy? (y/n) " setup_nginx
-    if [[ $setup_nginx == "y" || $setup_nginx == "Y" ]]; then
-      read -p "Enter domain name (e.g., dashboard.example.com): " domain_name
-      
-      if [ -z "$domain_name" ]; then
-        log "⚠️  No domain provided, skipping Nginx setup"
-      else
-        sudo bash -c "cat > /etc/nginx/sites-available/$domain_name" << EOL
-server {
-    listen 80;
-    server_name $domain_name;
-
-    location / {
-        proxy_pass http://localhost:$port;
-        proxy_http_version 1.1;
-        proxy_set_header Upgrade \$http_upgrade;
-        proxy_set_header Connection 'upgrade';
-        proxy_set_header Host \$host;
-        proxy_cache_bypass \$http_upgrade;
-    }
-}
-EOL
-        
-        sudo ln -s /etc/nginx/sites-available/$domain_name /etc/nginx/sites-enabled/ >> "$LOG_FILE" 2>&1
-        sudo nginx -t >> "$LOG_FILE" 2>&1
-        
-        if [ $? -eq 0 ]; then
-          sudo systemctl reload nginx >> "$LOG_FILE" 2>&1
-          log "✅ Nginx configured successfully!"
-          log "🌐 Dashboard is now available at: http://$domain_name"
-          
-          # Ask about SSL
-          read -p "Would you like to secure with SSL using Let's Encrypt? (y/n) " setup_ssl
-          if [[ $setup_ssl == "y" || $setup_ssl == "Y" ]]; then
-            if ! command -v certbot > /dev/null; then
-              log "📦 Installing Certbot..."
-              sudo apt-get update >> "$LOG_FILE" 2>&1
-              sudo apt-get install -y certbot python3-certbot-nginx >> "$LOG_FILE" 2>&1
-            fi
-            
-            sudo certbot --nginx -d $domain_name --non-interactive --agree-tos --email admin@$domain_name >> "$LOG_FILE" 2>&1
-            
-            if [ $? -eq 0 ]; then
-              log "🔒 SSL certificate installed successfully!"
-              log "🌐 Dashboard is now available at: https://$domain_name"
-            else
-              log "⚠️  SSL setup failed. Check $LOG_FILE for details."
-            fi
-          fi
-        else
-          log "⚠️  Nginx configuration test failed. Check syntax and try again."
-        fi
-      fi
-    fi
-  fi
-fi
 
 # Add cleanup option for future use
 cat > cleanup.sh << EOL

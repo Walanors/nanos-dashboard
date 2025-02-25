@@ -1,12 +1,16 @@
 import express from 'express';
-import { createServer } from 'node:http';
+import { createServer as createHttpServer } from 'node:http';
+import { createServer as createHttpsServer } from 'node:https';
 import * as path from 'node:path';
+import * as fs from 'node:fs';
 import next from 'next';
 import { Server } from 'socket.io';
 import { authenticateRequest as authenticate } from './middleware/auth';
 import cors from 'cors';
 import helmet from 'helmet';
 import dotenv from 'dotenv';
+import type { Server as HttpServer } from 'node:http';
+import type { Server as HttpsServer } from 'node:https';
 
 // Load environment variables
 dotenv.config();
@@ -41,7 +45,48 @@ console.log('Allowed origins:', allowedOrigins);
 // Prepare Next.js for handling requests
 app.prepare().then(() => {
   const server = express();
-  const httpServer = createServer(server);
+  
+  // Create HTTP or HTTPS server based on environment
+  let httpServer: HttpServer | HttpsServer;
+  
+  // Enhanced SSL debugging
+  console.log('SSL Configuration:');
+  console.log('SSL_ENABLED:', process.env.SSL_ENABLED);
+  console.log('SSL_CERT_PATH:', process.env.SSL_CERT_PATH);
+  console.log('SSL_KEY_PATH:', process.env.SSL_KEY_PATH);
+  
+  // Check if SSL certificates exist
+  const certExists = process.env.SSL_CERT_PATH ? fs.existsSync(process.env.SSL_CERT_PATH) : false;
+  const keyExists = process.env.SSL_KEY_PATH ? fs.existsSync(process.env.SSL_KEY_PATH) : false;
+  
+  console.log('SSL_CERT_PATH exists:', certExists);
+  console.log('SSL_KEY_PATH exists:', keyExists);
+  
+  const sslEnabled = process.env.SSL_ENABLED === 'true' && certExists && keyExists;
+  console.log('Final sslEnabled value:', sslEnabled);
+  
+  if (sslEnabled) {
+    try {
+      // Create HTTPS server with SSL certificates
+      const httpsOptions = {
+        key: fs.readFileSync(process.env.SSL_KEY_PATH as string),
+        cert: fs.readFileSync(process.env.SSL_CERT_PATH as string)
+      };
+      httpServer = createHttpsServer(httpsOptions, server);
+      console.log('HTTPS server enabled successfully');
+    } catch (error) {
+      console.error('Error creating HTTPS server:', error);
+      console.log('Falling back to HTTP server');
+      httpServer = createHttpServer(server);
+    }
+  } else {
+    // Create HTTP server
+    httpServer = createHttpServer(server);
+    console.log('HTTP server enabled (no SSL)');
+    if (process.env.SSL_ENABLED === 'true') {
+      console.log('SSL was enabled in config but certificates were not found or invalid');
+    }
+  }
   
   // Initialize Socket.io
   const io = new Server(httpServer, {
@@ -115,8 +160,9 @@ app.prepare().then(() => {
   });
   
   // Start the server
-  httpServer.listen(port, () => {
-    console.log(`> Ready on http://${hostname}:${port}`);
+  httpServer.listen(port, '0.0.0.0', () => {
+    const protocol = sslEnabled ? 'https' : 'http';
+    console.log(`> Ready on ${protocol}://0.0.0.0:${port}`);
     console.log(`> Admin username: ${process.env.ADMIN_USERNAME}`);
   });
 }); 
