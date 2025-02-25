@@ -31,6 +31,13 @@ const port = Number.parseInt(process.env.PORT || '3000', 10);
 const app = next({ dev, hostname, port });
 const handle = app.getRequestHandler();
 
+// Parse allowed origins from environment variable
+const allowedOrigins = process.env.ALLOWED_ORIGINS 
+  ? process.env.ALLOWED_ORIGINS.split(',').map(origin => origin.trim())
+  : ['http://localhost:3000'];
+
+console.log('Allowed origins:', allowedOrigins);
+
 // Prepare Next.js for handling requests
 app.prepare().then(() => {
   const server = express();
@@ -39,7 +46,7 @@ app.prepare().then(() => {
   // Initialize Socket.io
   const io = new Server(httpServer, {
     cors: {
-      origin: dev ? ["http://localhost:3000"] : ["https://yourdomain.com"],
+      origin: allowedOrigins,
       methods: ["GET", "POST"],
       credentials: true
     }
@@ -66,7 +73,7 @@ app.prepare().then(() => {
   
   // Middleware
   server.use(cors({
-    origin: process.env.ALLOWED_ORIGINS ? process.env.ALLOWED_ORIGINS.split(',') : '*',
+    origin: allowedOrigins,
     credentials: true
   }));
   
@@ -84,12 +91,15 @@ app.prepare().then(() => {
         scriptSrc: scriptSrcDirectives,
         styleSrc: ["'self'", "'unsafe-inline'", "cdn.jsdelivr.net"],
         imgSrc: ["'self'", "data:"],
-        connectSrc: ["'self'", "ws:", "wss:"], // Add WebSocket support
+        connectSrc: ["'self'", ...allowedOrigins, "ws:", "wss:"], // Add WebSocket and allowed origins
         fontSrc: ["'self'", "cdn.jsdelivr.net"],
         objectSrc: ["'none'"],
-        frameSrc: ["'none'"]
+        frameSrc: ["'none'"],
+        formAction: ["'self'", ...allowedOrigins] // Allow form submissions to allowed origins
       }
-    }
+    },
+    // Disable forcing HTTPS
+    hsts: false
   }));
   
   server.use(express.json());
@@ -107,5 +117,6 @@ app.prepare().then(() => {
   // Start the server
   httpServer.listen(port, () => {
     console.log(`> Ready on http://${hostname}:${port}`);
+    console.log(`> Admin username: ${process.env.ADMIN_USERNAME}`);
   });
 }); 
