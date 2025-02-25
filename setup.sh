@@ -63,8 +63,12 @@ port=${port:-$DEFAULT_PORT}
 read -p "Admin username [$DEFAULT_USERNAME]: " username
 username=${username:-$DEFAULT_USERNAME}
 
-read -p "Admin password [$DEFAULT_PASSWORD]: " -s password
-echo ""
+# Replace problematic read -s with stty-based approach
+echo -n "Admin password [$DEFAULT_PASSWORD]: "
+stty -echo
+read password
+stty echo
+echo # Add a newline after password input
 password=${password:-$DEFAULT_PASSWORD}
 
 read -p "Allowed origins (comma-separated) [http://localhost:$port]: " origins
