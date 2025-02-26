@@ -54,9 +54,7 @@ export default function ServerConfiguration() {
     setIsLoading(true);
     setError(null);
     try {
-
-      const result = await executeCommand(`sudo cat ${NANOS_INSTALL_DIR}/Config.toml`);
-      console.log('Checking result', result);
+      const result = await executeCommand(`cat ${NANOS_INSTALL_DIR}/Config.toml`);
       if (result.error) {
         throw new Error(result.error);
       }
@@ -66,16 +64,30 @@ export default function ServerConfiguration() {
       
       // Log the raw config content for debugging
       toast.success('Raw config content loaded');
+      console.log('Raw config content:', configContent);
       
       try {
         // Parse TOML content
         const parsedConfig = TOML.parse(configContent) as unknown as ServerConfig;
+        console.log('Parsed config:', parsedConfig);
         
         // Log the parsed config for debugging
         toast.success('TOML parsed successfully');
         
         // Validate required fields
-        if (!validateConfig(parsedConfig)) {
+        const validationResult = validateConfig(parsedConfig);
+        console.log('Validation result:', validationResult);
+        
+        if (!validationResult) {
+          // Log the missing or invalid fields
+          const conf = parsedConfig as ServerConfig;
+          console.log('Validation details:');
+          console.log('discover section:', conf.discover);
+          console.log('general section:', conf.general);
+          console.log('game section:', conf.game);
+          console.log('debug section:', conf.debug);
+          console.log('optimization section:', conf.optimization);
+          
           toast.error('Config validation failed');
           throw new Error('Invalid configuration file format');
         }
@@ -83,6 +95,7 @@ export default function ServerConfiguration() {
         toast.success('Config validation passed');
         setConfig(parsedConfig);
       } catch (parseError) {
+        console.error('TOML Parse error:', parseError);
         toast.error(`TOML Parse error: ${(parseError as Error).message}`);
         throw new Error(`Failed to parse TOML: ${(parseError as Error).message}`);
       }
