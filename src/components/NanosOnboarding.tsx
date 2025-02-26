@@ -72,41 +72,53 @@ export default function NanosOnboarding() {
     addLogMessage(`> Selected version: ${NANOS_VERSIONS.find(v => v.id === selectedVersion)?.name}`);
     
     try {
-      // Install server
-      const response = await fetch('/api/server/install', {
-        method: 'POST',
-        headers: {
-          'Content-Type': 'application/json',
-        },
-        body: JSON.stringify({
-          version: selectedVersion
-        })
-      });
+      setInstallationProgress(10);
+      addLogMessage('> Adding multiverse repository...');
+      const addRepo = await executeCommand('sudo add-apt-repository multiverse -y');
+      if (addRepo.error) throw new Error(addRepo.error);
 
-      if (!response.ok) {
-        const error = await response.json();
-        throw new Error(error.error || 'Installation failed');
-      }
+      setInstallationProgress(20);
+      addLogMessage('> Adding i386 architecture...');
+      const addArch = await executeCommand('sudo dpkg --add-architecture i386');
+      if (addArch.error) throw new Error(addArch.error);
 
-      const data = await response.json();
-      
-      // Update progress and logs based on installation steps
-      setInstallationProgress(25);
-      addLogMessage('> Installing system dependencies...');
-      
+      setInstallationProgress(30);
+      addLogMessage('> Updating package lists...');
+      const aptUpdate = await executeCommand('sudo apt update');
+      if (aptUpdate.error) throw new Error(aptUpdate.error);
+
+      setInstallationProgress(40);
+      addLogMessage('> Installing required dependencies...');
+      const installDeps = await executeCommand('sudo apt install -y lib32gcc1 steamcmd');
+      if (installDeps.error) throw new Error(installDeps.error);
+
       setInstallationProgress(50);
+      addLogMessage('> Creating installation directory...');
+      const installDir = '/opt/nanos-world-server';
+      const createDir = await executeCommand(`sudo mkdir -p ${installDir}`);
+      if (createDir.error) throw new Error(createDir.error);
+
+      const setPerms = await executeCommand(`sudo chown -R $USER:$USER ${installDir}`);
+      if (setPerms.error) throw new Error(setPerms.error);
+
+      setInstallationProgress(60);
       addLogMessage('> Downloading Nanos World Server...');
+      // Prepare SteamCMD command based on version
+      const steamCmd = selectedVersion === 'standard' 
+        ? `steamcmd +force_install_dir ${installDir} +login anonymous +app_update 1936830 validate +quit`
+        : `steamcmd +force_install_dir ${installDir} +login anonymous +app_update "1936830 -beta bleeding-edge" validate +quit`;
       
-      setInstallationProgress(75);
-      addLogMessage('> Configuring server...');
-      
-      if (data.error) {
-        addLogMessage(`> Warning: ${data.error}`);
-      }
-      
+      const installServer = await executeCommand(steamCmd);
+      if (installServer.error) throw new Error(installServer.error);
+
+      setInstallationProgress(90);
+      addLogMessage('> Setting up permissions...');
+      const makeExecutable = await executeCommand(`chmod +x ${installDir}/NanosWorldServer.sh`);
+      if (makeExecutable.error) throw new Error(makeExecutable.error);
+
       setInstallationProgress(100);
       addLogMessage('> Installation complete!');
-      addLogMessage(`> Server installed at: ${data.installPath}`);
+      addLogMessage(`> Server installed at: ${installDir}`);
       addLogMessage('> You can now proceed with server configuration.');
       
     } catch (error) {
