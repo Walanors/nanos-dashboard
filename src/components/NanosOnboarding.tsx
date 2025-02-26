@@ -89,7 +89,7 @@ export default function NanosOnboarding() {
 
       setInstallationProgress(40);
       addLogMessage('> Installing required dependencies...');
-      const installDeps = await executeCommand('sudo apt install -y lib32gcc1 steamcmd');
+      const installDeps = await executeCommand('sudo apt install -y lib32gcc-s1 steamcmd');
       if (installDeps.error) throw new Error(installDeps.error);
 
       setInstallationProgress(50);
