@@ -51,21 +51,17 @@ async function checkForUpdates(): Promise<{
   try {
     // Get current version from local file
     const currentVer = await getCurrentVersion();
+    const localContent = await fs.readFile(LOCAL_UPDATE_FILE, 'utf-8');
+    const localManifest: UpdateManifest = JSON.parse(localContent);
     
-    // Execute git fetch to get latest refs
-    await execPromise('git fetch');
-    
-    // Try to read update.json from origin/main
-    const { stdout: remoteContent } = await execPromise('git show origin/main:update.json');
-    const remoteManifest: UpdateManifest = JSON.parse(remoteContent);
-    
-    const updateAvailable = remoteManifest.latest_version !== currentVer;
+    // Compare version numbers
+    const updateAvailable = localManifest.latest_version !== currentVer;
 
     return {
       current: currentVer,
-      latest: remoteManifest.latest_version,
+      latest: localManifest.latest_version,
       updateAvailable,
-      updateInfo: updateAvailable ? remoteManifest : null
+      updateInfo: updateAvailable ? localManifest : null
     };
   } catch (error) {
     console.error('Error checking for updates:', error);
