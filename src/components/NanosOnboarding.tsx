@@ -189,18 +189,39 @@ echo steam steam/question select "I AGREE" | debconf-set-selections`;
       addLogMessage('> Downloading Nanos World Server...');
       // Using script to handle SteamCMD interactive prompts
       const steamCmdScript = `#!/bin/bash
+set -x  # Enable command tracing
 echo "Creating SteamCMD script..."
-cat << EOF > /tmp/steamcmd_script.txt
+
+# Create a log directory
+mkdir -p /tmp/nanos_install_logs
+LOG_FILE="/tmp/nanos_install_logs/steamcmd_$(date +%Y%m%d_%H%M%S).log"
+echo "Logging to: $LOG_FILE"
+
+# Create the SteamCMD script with verbose logging
+cat << 'STEAMEOF' > /tmp/steamcmd_script.txt
 @ShutdownOnFailedCommand 1
 @NoPromptForPassword 1
 force_install_dir ${installDir}
 login anonymous
-app_update ${selectedVersion === 'standard' ? '1936830' : '1936830 -beta bleeding-edge'} validate
+app_update 1936830 -beta bleeding-edge validate +verbose
 quit
-EOF
+STEAMEOF
 
 echo "Running SteamCMD with script..."
-steamcmd +runscript /tmp/steamcmd_script.txt
+# Run SteamCMD with output going to both console and log file
+steamcmd +runscript /tmp/steamcmd_script.txt 2>&1 | tee -a "$LOG_FILE"
+
+# Check if SteamCMD succeeded
+STEAM_EXIT=$?
+if [ $STEAM_EXIT -ne 0 ]; then
+    echo "SteamCMD failed with exit code: $STEAM_EXIT"
+    echo "Last 20 lines of log file:"
+    tail -n 20 "$LOG_FILE"
+    exit $STEAM_EXIT
+fi
+
+echo "SteamCMD installation completed"
+echo "Full logs available at: $LOG_FILE"
 `;
       
       // Save and execute the script
@@ -223,6 +244,15 @@ steamcmd +runscript /tmp/steamcmd_script.txt
         throw new Error(installServer.error);
       }
       addLogMessage(installServer.output);
+
+      // After executing the script, check the logs
+      const checkLogs = await executeCommand('tail -f /tmp/nanos_install_logs/steamcmd_*.log');
+      if (checkLogs.error) {
+        addLogMessage(`Error reading logs: ${checkLogs.error}`);
+      } else {
+        addLogMessage('Latest installation logs:');
+        addLogMessage(checkLogs.output);
+      }
 
       setInstallationProgress(90);
       addLogMessage('> Setting up permissions...');
