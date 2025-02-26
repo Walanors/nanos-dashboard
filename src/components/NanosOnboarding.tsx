@@ -184,6 +184,15 @@ echo steam steam/question select "I AGREE" | debconf-set-selections`;
         throw new Error(setPerms.error);
       }
       addLogMessage(setPerms.output);
+      
+      setInstallationProgress(55);
+      addLogMessage('> Downloading SteamCMD...');
+      const downloadSteamCmd = await executeCommand('steamcmd');
+      if (downloadSteamCmd.error) {
+        addLogMessage(`Error: ${downloadSteamCmd.error}`);
+        throw new Error(downloadSteamCmd.error);
+      }
+      addLogMessage(downloadSteamCmd.output);
 
       setInstallationProgress(60);
       addLogMessage('> Downloading Nanos World Server...');
