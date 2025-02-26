@@ -101,15 +101,28 @@ export default function NanosOnboarding() {
 
       setInstallationProgress(40);
       addLogMessage('> Installing required dependencies...');
+      
+      // Clean up any stuck processes and locked files
+      addLogMessage('> Checking for locked package manager...');
+      await executeCommand('sudo killall apt apt-get dpkg 2>/dev/null || true');
+      await executeCommand('sudo rm -f /var/lib/dpkg/lock* /var/lib/apt/lists/lock* /var/cache/apt/archives/lock* /var/cache/debconf/*.dat.lock 2>/dev/null || true');
+      
+      // Wait a moment for processes to clean up
+      await new Promise(resolve => setTimeout(resolve, 2000));
+      
       // Pre-accept Steam license agreement using separate commands
       addLogMessage('> Pre-accepting Steam license agreement...');
       
-      // Create a temporary script for license acceptance
+      // Create a temporary script for license acceptance with error handling
       const licenseScript = `#!/bin/bash
-echo "steam steam/license note ''" | sudo debconf-set-selections
-echo "steam steam/question select I AGREE" | sudo debconf-set-selections`;
+set -e
+# Clean up any existing locks
+rm -f /var/cache/debconf/*.dat.lock 2>/dev/null || true
+# Set up Steam license
+echo steam steam/license note '' | debconf-set-selections
+echo steam steam/question select "I AGREE" | debconf-set-selections`;
       
-      const createLicenseScript = await executeCommand('cat << EOF > /tmp/accept_steam_license.sh\n' + licenseScript + '\nEOF');
+      const createLicenseScript = await executeCommand(`cat << 'EOF' > /tmp/accept_steam_license.sh\n${licenseScript}\nEOF`);
       if (createLicenseScript.error) {
         addLogMessage(`Error creating license script: ${createLicenseScript.error}`);
         throw new Error(createLicenseScript.error);
