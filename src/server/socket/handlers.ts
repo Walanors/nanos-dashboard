@@ -4,6 +4,7 @@ import * as fs from 'node:fs/promises';
 import * as path from 'node:path';
 import * as util from 'node:util';
 import * as os from 'node:os';
+import * as osUtils from 'node-os-utils';
 
 // Convert exec to use promises
 const execPromise = util.promisify(exec);
@@ -41,6 +42,7 @@ interface SystemMetrics {
   cpu: {
     loadAvg: number[];
     cores: number;
+    usage: number;
   };
   timestamp: number;
 }
@@ -51,13 +53,13 @@ type SocketCallback<T> = (response: T) => void;
 // Track metrics intervals by socket ID
 const metricsIntervals: Map<string, NodeJS.Timeout> = new Map();
 
-/**
- * Get current system metrics
- */
-function getSystemMetrics(): SystemMetrics {
+async function getSystemMetrics(): Promise<SystemMetrics> {
   const totalMem = os.totalmem();
   const freeMem = os.freemem();
   const usedMem = totalMem - freeMem;
+  
+  // Get CPU usage using node-os-utils
+  const cpuUsage = await osUtils.cpu.usage();
   
   return {
     uptime: os.uptime(),
@@ -69,7 +71,8 @@ function getSystemMetrics(): SystemMetrics {
     },
     cpu: {
       loadAvg: os.loadavg(),
-      cores: os.cpus().length
+      cores: os.cpus().length,
+      usage: cpuUsage
     },
     timestamp: Date.now()
   };
@@ -87,8 +90,8 @@ export function configureSocketHandlers(io: Server): void {
     console.log(`Socket connected: ${userSocket.id} - User: ${userSocket.data.user.username}`);
     
     // Start sending metrics to this client
-    const metricsInterval = setInterval(() => {
-      const metrics = getSystemMetrics();
+    const metricsInterval = setInterval(async () => {
+      const metrics = await getSystemMetrics();
       userSocket.emit('system_metrics', metrics);
     }, METRICS_INTERVAL);
     

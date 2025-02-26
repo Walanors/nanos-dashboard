@@ -113,8 +113,11 @@ export default function DashboardPage() {
 
   if (isLoading) {
     return (
-      <div className="flex justify-center items-center h-screen bg-gradient-to-br from-gray-900 to-black">
-        <div className="animate-pulse text-amber-400 text-lg">Loading...</div>
+      <div className="flex justify-center items-center h-screen">
+        <div className="animate-pulse text-amber-400 text-lg font-mono">
+          <span className="mr-2">$</span>
+          Loading system data...
+        </div>
       </div>
     );
   }
@@ -124,139 +127,130 @@ export default function DashboardPage() {
   }
 
   return (
-    <div className="min-h-screen bg-gradient-to-br from-gray-900 to-black p-8 text-gray-200">
-      {/* Header */}
-      <div className="flex justify-between items-center mb-8 backdrop-blur-sm backdrop-filter bg-black/30 p-4 rounded-xl shadow-xl border border-gray-800">
-        <h1 className="text-2xl font-bold bg-gradient-to-r from-amber-200 to-amber-400 text-transparent bg-clip-text">
-          Nanos Dashboard
-        </h1>
-        <div className="flex items-center">
-          {socketError && (
-            <div className="text-sm text-red-400 mr-4">
-              Socket error: {socketError}
-            </div>
-          )}
-          {isConnected ? (
-            <span className="inline-flex items-center px-2.5 py-1 rounded-full text-xs font-medium bg-gray-800/70 text-green-400 mr-4 border border-green-900">
-              <span className="w-2 h-2 mr-1 bg-green-400 rounded-full animate-pulse" />
-              Connected
-            </span>
-          ) : (
-            <span className="inline-flex items-center px-2.5 py-1 rounded-full text-xs font-medium bg-gray-800/70 text-red-400 mr-4 border border-red-900">
-              <span className="w-2 h-2 mr-1 bg-red-400 rounded-full" />
-              Disconnected
-            </span>
-          )}
-          <button 
-            type="button"
-            onClick={handleLogout}
-            className="px-4 py-2 bg-red-900/80 text-white rounded-md hover:bg-red-800 transition-all duration-200 border border-red-700"
-          >
-            Logout
-          </button>
-        </div>
+    <div className="h-screen p-6 overflow-auto">
+      {/* Connection status indicator */}
+      <div className="flex justify-end items-center mb-4">
+        {socketError && (
+          <div className="text-sm text-red-400 mr-4 font-mono">
+            <span className="text-red-500 mr-1">!</span>
+            Socket error: {socketError}
+          </div>
+        )}
+        {isConnected ? (
+          <span className="inline-flex items-center px-2.5 py-1 rounded-full text-xs font-medium bg-zinc-900/70 text-green-400 border border-green-900/50">
+            <span className="w-2 h-2 mr-1 bg-green-400 rounded-full animate-pulse" />
+            Connected
+          </span>
+        ) : (
+          <span className="inline-flex items-center px-2.5 py-1 rounded-full text-xs font-medium bg-zinc-900/70 text-red-400 border border-red-900/50">
+            <span className="w-2 h-2 mr-1 bg-red-400 rounded-full" />
+            Disconnected
+          </span>
+        )}
       </div>
       
-      <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
+      {/* Page heading */}
+      <h1 className="text-2xl font-bold text-amber-300 mb-6 font-mono border-b border-amber-500/20 pb-2">
+        Overview
+      </h1>
+      
+      <div className="grid grid-cols-1 lg:grid-cols-2 gap-6">
         {/* System Information Panel */}
-        <div className="backdrop-blur-md backdrop-filter bg-gray-800/30 p-6 rounded-xl shadow-xl border border-gray-700 transition-all duration-300 hover:bg-gray-800/40">
-          <h2 className="text-xl font-semibold mb-4 border-b border-gray-700 pb-2 text-amber-300">System Information</h2>
+        <div className="backdrop-blur-sm backdrop-filter bg-black/40 p-6 rounded-xl shadow-xl border border-amber-500/20 transition-all duration-300 hover:bg-black/50">
+          <h2 className="text-xl font-semibold mb-4 border-b border-amber-500/20 pb-2 text-amber-300 font-mono">
+            <span className="mr-2">$</span>
+            System Information
+          </h2>
           {systemInfo ? (
             <div className="grid grid-cols-2 gap-4">
-              <div className="backdrop-blur-sm bg-black/20 p-3 rounded-lg border border-gray-700">
-                <span className="text-gray-400 text-sm">Hostname</span>
-                <p className="text-gray-200">{systemInfo.hostname}</p>
+              <div className="backdrop-blur-sm bg-black/20 p-3 rounded-lg border border-amber-500/10">
+                <span className="text-amber-400/70 text-sm font-mono">Hostname</span>
+                <p className="text-amber-100 font-mono">{systemInfo.hostname}</p>
               </div>
-              <div className="backdrop-blur-sm bg-black/20 p-3 rounded-lg border border-gray-700">
-                <span className="text-gray-400 text-sm">Platform</span>
-                <p className="text-gray-200">{systemInfo.platform}</p>
+              <div className="backdrop-blur-sm bg-black/20 p-3 rounded-lg border border-amber-500/10">
+                <span className="text-amber-400/70 text-sm font-mono">Platform</span>
+                <p className="text-amber-100 font-mono">{systemInfo.platform}</p>
               </div>
-              <div className="backdrop-blur-sm bg-black/20 p-3 rounded-lg border border-gray-700">
-                <span className="text-gray-400 text-sm">Architecture</span>
-                <p className="text-gray-200">{systemInfo.arch}</p>
+              <div className="backdrop-blur-sm bg-black/20 p-3 rounded-lg border border-amber-500/10">
+                <span className="text-amber-400/70 text-sm font-mono">Architecture</span>
+                <p className="text-amber-100 font-mono">{systemInfo.arch}</p>
               </div>
-              <div className="backdrop-blur-sm bg-black/20 p-3 rounded-lg border border-gray-700">
-                <span className="text-gray-400 text-sm">CPU Cores</span>
-                <p className="text-gray-200">{systemInfo.cpus}</p>
+              <div className="backdrop-blur-sm bg-black/20 p-3 rounded-lg border border-amber-500/10">
+                <span className="text-amber-400/70 text-sm font-mono">CPU Cores</span>
+                <p className="text-amber-100 font-mono">{systemInfo.cpus}</p>
               </div>
             </div>
           ) : (
-            <p className="text-amber-400">Unable to load system information</p>
+            <p className="text-amber-400 font-mono">Unable to load system information</p>
           )}
           
-          {/* Real-time metrics */}
-          {metrics && (
-            <div className="mt-6 border-t border-gray-700 pt-4">
-              <h3 className="text-lg font-medium mb-3 text-amber-300">Real-time Metrics</h3>
-              <div className="grid grid-cols-2 gap-4">
-                <div className="backdrop-blur-sm bg-black/20 p-3 rounded-lg border border-gray-700">
-                  <span className="text-gray-400 text-sm">Uptime</span>
-                  <p className="text-amber-200">{formatUptime(metrics.uptime)}</p>
-                </div>
-                <div className="backdrop-blur-sm bg-black/20 p-3 rounded-lg border border-gray-700">
-                  <span className="text-gray-400 text-sm">Load Average</span>
-                  <p className="text-amber-200">{metrics.cpu.loadAvg[0].toFixed(2)}</p>
-                </div>
-                <div className="backdrop-blur-sm bg-black/20 p-3 rounded-lg border border-gray-700 col-span-2">
-                  <span className="text-gray-400 text-sm">Memory Usage</span>
-                  <div className="relative pt-1">
-                    <div className="flex items-center justify-between">
-                      <div>
-                        <span className="text-xs font-semibold inline-block text-amber-200">
-                          {metrics.memory.usedPercent.toFixed(1)}%
-                        </span>
-                      </div>
-                      <div className="text-right">
-                        <span className="text-xs font-semibold inline-block text-amber-200">
-                          {formatBytes(metrics.memory.used)} / {formatBytes(metrics.memory.total)}
-                        </span>
-                      </div>
-                    </div>
-                    <div className="overflow-hidden h-2 mb-1 text-xs flex rounded bg-gray-700 mt-1 border border-gray-600">
-                      <div 
-                        style={{ width: `${metrics.memory.usedPercent}%` }} 
-                        className={`shadow-none flex flex-col text-center whitespace-nowrap text-white justify-center ${
-                          metrics.memory.usedPercent > 90 ? 'bg-red-500' : 
-                          metrics.memory.usedPercent > 70 ? 'bg-amber-500' : 'bg-green-500'
-                        }`}
-                      />
-                    </div>
-                  </div>
-                </div>
-                <div className="backdrop-blur-sm bg-black/20 p-3 rounded-lg border border-gray-700">
-                  <span className="text-gray-400 text-sm">Last Update</span>
-                  <p className="text-amber-200">{new Date(metrics.timestamp).toLocaleTimeString()}</p>
-                </div>
+          {/* Uptime information */}
+          {systemInfo && (
+            <div className="mt-6">
+              <div className="backdrop-blur-sm bg-black/20 p-3 rounded-lg border border-amber-500/10">
+                <span className="text-amber-400/70 text-sm font-mono">System Uptime</span>
+                <p className="text-amber-100 font-mono">{formatUptime(systemInfo.uptime)}</p>
               </div>
             </div>
           )}
         </div>
         
         {/* Terminal Panel */}
-        <div className="backdrop-blur-md backdrop-filter bg-gray-800/30 p-6 rounded-xl shadow-xl border border-gray-700 transition-all duration-300 hover:bg-gray-800/40">
-          <h2 className="text-xl font-semibold mb-4 border-b border-gray-700 pb-2 text-amber-300">Terminal</h2>
-          <div className="mb-4 bg-black border border-gray-700 p-4 rounded-lg h-72 overflow-y-auto font-mono text-sm text-amber-300 shadow-[inset_0_0_10px_rgba(0,0,0,0.6)]">
+        <div className="backdrop-blur-sm backdrop-filter bg-black/40 p-6 rounded-xl shadow-xl border border-amber-500/20 transition-all duration-300 hover:bg-black/50">
+          <h2 className="text-xl font-semibold mb-4 border-b border-amber-500/20 pb-2 text-amber-300 font-mono">
+            <span className="mr-2">$</span>
+            Quick Command
+          </h2>
+          <div className="mb-4 bg-zinc-900/50 border border-amber-500/20 p-4 rounded-lg h-60 overflow-y-auto font-mono text-sm text-amber-300 shadow-[inset_0_0_10px_rgba(0,0,0,0.6)]">
             <pre className="whitespace-pre-wrap">
               {commandOutput || 'Welcome to Nanos Terminal. Type a command to begin.'}
             </pre>
           </div>
           <form onSubmit={handleExecuteCommand} className="flex">
-            <input
-              type="text"
-              value={command}
-              onChange={(e) => setCommand(e.target.value)}
-              placeholder="Enter command..."
-              disabled={!isConnected || isExecuting}
-              className="flex-grow px-4 py-2 border border-gray-700 bg-gray-900 text-amber-300 rounded-l-md focus:outline-none focus:ring-2 focus:ring-amber-500 focus:border-transparent placeholder-gray-500"
-            />
+            <div className="flex-grow flex items-center bg-zinc-900/50 border border-amber-500/20 rounded-l-md px-2">
+              <span className="text-amber-400 mr-2">$</span>
+              <input
+                type="text"
+                value={command}
+                onChange={(e) => setCommand(e.target.value)}
+                placeholder="Enter command..."
+                disabled={!isConnected || isExecuting}
+                className="flex-grow py-2 bg-transparent text-amber-100 focus:outline-none placeholder-amber-400/30 font-mono"
+              />
+            </div>
             <button
               type="submit"
               disabled={!isConnected || isExecuting || !command.trim()}
-              className="px-4 py-2 bg-amber-700 text-gray-200 rounded-r-md hover:bg-amber-600 focus:outline-none focus:ring-2 focus:ring-amber-500 focus:border-transparent disabled:opacity-50 transition-colors duration-200"
+              className="px-4 py-2 bg-amber-500/20 text-amber-300 rounded-r-md hover:bg-amber-500/30 focus:outline-none focus:ring-2 focus:ring-amber-500/50 disabled:opacity-50 transition-all duration-200 border-y border-r border-amber-500/20 font-mono"
             >
               {isExecuting ? 'Running...' : 'Run'}
             </button>
           </form>
+        </div>
+        
+        {/* Server Status Panel */}
+        <div className="backdrop-blur-sm backdrop-filter bg-black/40 p-6 rounded-xl shadow-xl border border-amber-500/20 transition-all duration-300 hover:bg-black/50 lg:col-span-2">
+          <h2 className="text-xl font-semibold mb-4 border-b border-amber-500/20 pb-2 text-amber-300 font-mono">
+            <span className="mr-2">$</span>
+            Nanos Server Status
+          </h2>
+          <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
+            <div className="backdrop-blur-sm bg-black/20 p-4 rounded-lg border border-amber-500/10 flex flex-col items-center justify-center">
+              <div className="text-amber-400/70 text-sm font-mono mb-2">Server Status</div>
+              <div className="text-green-400 font-bold font-mono flex items-center">
+                <span className="w-2 h-2 mr-2 bg-green-400 rounded-full animate-pulse" />
+                ONLINE
+              </div>
+            </div>
+            <div className="backdrop-blur-sm bg-black/20 p-4 rounded-lg border border-amber-500/10 flex flex-col items-center justify-center">
+              <div className="text-amber-400/70 text-sm font-mono mb-2">Players</div>
+              <div className="text-amber-300 font-bold font-mono">0 / 32</div>
+            </div>
+            <div className="backdrop-blur-sm bg-black/20 p-4 rounded-lg border border-amber-500/10 flex flex-col items-center justify-center">
+              <div className="text-amber-400/70 text-sm font-mono mb-2">Game Mode</div>
+              <div className="text-amber-300 font-bold font-mono">Sandbox</div>
+            </div>
+          </div>
         </div>
       </div>
     </div>

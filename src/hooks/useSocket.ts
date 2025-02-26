@@ -38,6 +38,7 @@ interface SystemMetrics {
   cpu: {
     loadAvg: number[];
     cores: number;
+    usage: number;
   };
   timestamp: number;
 }
