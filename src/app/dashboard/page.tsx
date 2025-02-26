@@ -122,7 +122,11 @@ export default function DashboardPage() {
       if (result.error) {
         throw new Error(result.error);
       }
-      
+
+      const installPackages = await executeCommand('npm install');
+      if (installPackages.error) {
+        throw new Error(installPackages.error);
+      }
       // Rebuild the application after update
       const buildResult = await executeCommand('npm run build');
       if (buildResult.error) {
