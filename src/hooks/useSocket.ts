@@ -76,7 +76,7 @@ export function useSocket() {
     }
     
     try {
-      // Decode base64 credentials
+      // Decode credentials
       const credentialsString = atob(credentialsBase64);
       const [username, password] = credentialsString.split(':');
       
@@ -85,13 +85,12 @@ export function useSocket() {
         return;
       }
       
-      // Create socket connection with credentials
+      // Connect to socket with authentication
       const newSocket = io({
         auth: { username, password },
         reconnection: true,
-        reconnectionAttempts: Number.POSITIVE_INFINITY,
-        reconnectionDelay: 1000,
-        timeout: 20000
+        reconnectionAttempts: 5,
+        reconnectionDelay: 1000
       });
       
       newSocket.on('connect', () => {
@@ -104,12 +103,6 @@ export function useSocket() {
         console.error('Socket connection error:', err.message);
         setIsConnected(false);
         setError(err.message);
-        
-        // If authentication fails, clear credentials and redirect to login
-        if (err.message === 'Authentication failed' || err.message === 'Invalid credentials') {
-          sessionStorage.removeItem('credentials');
-          window.location.href = '/';
-        }
       });
       
       newSocket.on('disconnect', (reason) => {
@@ -118,19 +111,8 @@ export function useSocket() {
       });
       
       // Listen for system metrics updates
-      newSocket.on('system_metrics', (rawData: SystemMetrics | string) => {
-        let parsedData: SystemMetrics;
-        if (typeof rawData === 'string') {
-          try {
-            parsedData = JSON.parse(rawData);
-          } catch (e) {
-            console.error('Failed to parse system metrics:', e);
-            return;
-          }
-        } else {
-          parsedData = rawData;
-        }
-        setMetrics(parsedData);
+      newSocket.on('system_metrics', (data: SystemMetrics) => {
+        setMetrics(data);
       });
       
       setSocket(newSocket);
@@ -154,21 +136,11 @@ export function useSocket() {
         return;
       }
       
-      socket.emit('execute_command', command, (response: string | SocketResponse<CommandResult>) => {
-        try {
-          // Handle string response
-          if (typeof response === 'string') {
-            return resolve({ output: response });
-          }
-          
-          // Handle object response
-          if (response.success) {
-            resolve(response.result || { output: 'Command executed successfully' });
-          } else {
-            reject(new Error(response.error || 'Unknown error'));
-          }
-        } catch (err) {
-          reject(new Error('Failed to parse server response'));
+      socket.emit('execute_command', command, (response: SocketResponse<CommandResult>) => {
+        if (response.success) {
+          resolve(response.result || { output: 'Command executed successfully' });
+        } else {
+          reject(new Error(response.error || 'Unknown error'));
         }
       });
     });

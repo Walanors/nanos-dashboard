@@ -7,7 +7,7 @@ import * as os from 'node:os';
 import * as osUtils from 'node-os-utils';
 import fetch from 'node-fetch';
 import { getSystemMetrics } from '../utils/metrics';
-import { getServerConfig, saveServerConfig } from '../database';
+import { getServerConfig, saveServerConfig, initializeDefaultConfig } from '../database';
 
 // Promisify exec
 const execPromise = promisify(exec);
@@ -157,9 +157,17 @@ export function configureSocketHandlers(io: Server): void {
         
         // Handle special commands
         if (cmd === 'get_server_config') {
-          const config = getServerConfig();
+          let config = getServerConfig();
           if (!config) {
-            throw new Error('No configuration found');
+            // Initialize default config if none exists
+            const initialized = initializeDefaultConfig();
+            if (!initialized) {
+              throw new Error('Failed to initialize default configuration');
+            }
+            config = getServerConfig();
+            if (!config) {
+              throw new Error('Failed to load configuration after initialization');
+            }
           }
           callback({
             success: true,
