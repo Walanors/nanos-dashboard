@@ -24,38 +24,73 @@ const NANOS_VERSIONS = [
 export const NANOS_INSTALL_DIR = '/opt/nanos-world-server';
 
 // Default server configuration
-const DEFAULT_SERVER_CONFIG = `[discover]
-name = "a great server"
-description = "nanos made easy"
-ip = "0.0.0.0"
-port = 7777
-query_port = 7778
-announce = true
-dedicated_server = true
+const DEFAULT_SERVER_CONFIG = `# discover configurations
+[discover]
+    # server name
+    name =              "a great server"
+    # server description (max 127 characters)
+    description =       "nanos made easy"
+    # server IP. we recommend leaving it 0.0.0.0 for default
+    ip =                "0.0.0.0"
+    # server port (TCP and UDP)
+    port =              7777
+    # query port (UDP)
+    query_port =        7778
+    # announce server in the master server list
+    announce =          true
+    # true if should run as dedicated server or false to run as P2P - dedicated server requires port forwarding and provides the fastest connection - P2P will provide a fake IP to be used to connect but connection can be slower
+    dedicated_server =  true
 
+# general configurations
 [general]
-max_players = 64
-password = ""
-token = ""
-banned_ids = [ ]
+    # max players
+    max_players =       64
+    # leave it blank for no password
+    password =          ""
+    # nanos world server authentication token
+    token =             ""
+    # banned nanos account IDs
+    banned_ids = [
 
+    ]
+
+# game configurations
 [game]
-map = "default-blank-map"
-game_mode = ""
-packages = [ "", ]
-assets = [ ]
-loading_screen = ""
+    # default startup map
+    map =               "default-blank-map"
+    # game-mode package to load (set the main game-mode package to load - you can load only one 'game-mode' package type at once)
+    game_mode =         ""
+    # packages list (set the packages you want to load)
+    packages = [
+    ]
+    # asset packs list (additionally loads the asset packs you define here)
+    assets = [
 
+    ]
+    # loading-screen package to load (the loading screen will be displayed when players join your server)
+    loading_screen =    ""
+
+# custom settings values
+# those values can be accessed through Server.GetCustomSettings() method from any package
 [custom_settings]
+    # my_setting_example_01 = "value"
+    # my_setting_example_02 = 123
 
+# debug configurations
 [debug]
-log_level = 1
-async_log = true
-profiling = false
+    # log Level - (1) normal, (2) debug or (3) verbose
+    log_level =         1
+    # if to use async or sync logs (async provides better performance, disabling async logs can help debugging crashes)
+    async_log =         true
+    # enables performance profiling logs for debugging
+    profiling =         false
 
+# optimization configurations
 [optimization]
-tick_rate = 33
-compression = 0`;
+    # server tick rate in milliseconds (dangerous! server will tick at each [tick_rate] ms, affecting both server and client performance. 33 ms means 30 ticks per second and is the default and recommended value)
+    tick_rate =         33
+    # sets the compression level to use in some networking operations (0 - 9) - (0) disables it, (1) is the fastest and (9) is the slowest but has the highest compression ratio
+    compression =       0`;
 
 // Onboarding steps
 enum OnboardingStep {

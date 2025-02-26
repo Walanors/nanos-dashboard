@@ -59,8 +59,11 @@ export default function ServerConfiguration() {
         throw new Error(result.error);
       }
       
+      // Clean the output by removing the "Command executed successfully" line
+      const configContent = result.output.split('\n').slice(1).join('\n');
+      
       // Parse TOML content
-      const parsedConfig = TOML.parse(result.output) as unknown as ServerConfig;
+      const parsedConfig = TOML.parse(configContent) as unknown as ServerConfig;
       
       // Validate required fields
       if (!validateConfig(parsedConfig)) {
@@ -158,8 +161,69 @@ export default function ServerConfiguration() {
     setIsSaving(true);
     setError(null);
     try {
-      // Convert config object to TOML string
-      const configString = TOML.stringify(config as TOML.JsonMap);
+      // Format the configuration with comments and proper spacing
+      const configString = `# discover configurations
+[discover]
+    # server name
+    name = "${config.discover.name}"
+    # server description (max 127 characters)
+    description = "${config.discover.description}"
+    # server IP. we recommend leaving it 0.0.0.0 for default
+    ip = "${config.discover.ip}"
+    # server port (TCP and UDP)
+    port = ${config.discover.port}
+    # query port (UDP)
+    query_port = ${config.discover.query_port}
+    # announce server in the master server list
+    announce = ${config.discover.announce}
+    # true if should run as dedicated server or false to run as P2P
+    dedicated_server = ${config.discover.dedicated_server}
+
+# general configurations
+[general]
+    # max players
+    max_players = ${config.general.max_players}
+    # leave it blank for no password
+    password = "${config.general.password}"
+    # nanos world server authentication token
+    token = "${config.general.token}"
+    # banned nanos account IDs
+    banned_ids = ${JSON.stringify(config.general.banned_ids)}
+
+# game configurations
+[game]
+    # default startup map
+    map = "${config.game.map}"
+    # game-mode package to load
+    game_mode = "${config.game.game_mode}"
+    # packages list
+    packages = ${JSON.stringify(config.game.packages)}
+    # asset packs list
+    assets = ${JSON.stringify(config.game.assets)}
+    # loading-screen package to load
+    loading_screen = "${config.game.loading_screen}"
+
+# custom settings values
+[custom_settings]
+${Object.entries(config.custom_settings)
+  .map(([key, value]) => `    ${key} = ${JSON.stringify(value)}`)
+  .join('\n')}
+
+# debug configurations
+[debug]
+    # log Level - (1) normal, (2) debug or (3) verbose
+    log_level = ${config.debug.log_level}
+    # if to use async or sync logs
+    async_log = ${config.debug.async_log}
+    # enables performance profiling logs
+    profiling = ${config.debug.profiling}
+
+# optimization configurations
+[optimization]
+    # server tick rate in milliseconds
+    tick_rate = ${config.optimization.tick_rate}
+    # compression level (0-9)
+    compression = ${config.optimization.compression}`;
       
       // Save the file
       const result = await executeCommand(`echo '${configString}' > ${NANOS_INSTALL_DIR}/Config.toml`);
