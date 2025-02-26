@@ -1,0 +1,6 @@
+{
+  "latest_version": "1.0.1",
+  "repository_url": "https://github.com/Walanors/nanos-dashboard.git",
+  "changelog": "- Added automatic update system\n- Improved CPU usage monitoring\n- Fixed terminal command output display",
+  "required": false
+} 

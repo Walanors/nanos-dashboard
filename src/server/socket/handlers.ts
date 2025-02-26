@@ -5,9 +5,59 @@ import * as path from 'node:path';
 import * as util from 'node:util';
 import * as os from 'node:os';
 import * as osUtils from 'node-os-utils';
+import fetch from 'node-fetch';
 
 // Convert exec to use promises
 const execPromise = util.promisify(exec);
+
+// Constants for version checking
+const CURRENT_VERSION = '1.0.0';
+const UPDATE_CHECK_INTERVAL = 30000; // 30 seconds
+const UPDATE_MANIFEST_URL = 'https://raw.githubusercontent.com/Walanors/nanos-dashboard/main/update.json';
+
+// Interface for update info from manifest
+interface UpdateManifest {
+  latest_version: string;
+  repository_url: string;
+  changelog: string;
+  required: boolean;
+}
+
+// Track update check interval
+let updateCheckInterval: NodeJS.Timeout | null = null;
+
+// Function to check for updates
+async function checkForUpdates(): Promise<{
+  current: string;
+  latest: string | null;
+  updateAvailable: boolean;
+  updateInfo: UpdateManifest | null;
+}> {
+  try {
+    const response = await fetch(UPDATE_MANIFEST_URL);
+    if (!response.ok) {
+      throw new Error('Failed to fetch update manifest');
+    }
+
+    const manifest: UpdateManifest = await response.json();
+    const updateAvailable = manifest.latest_version !== CURRENT_VERSION;
+
+    return {
+      current: CURRENT_VERSION,
+      latest: manifest.latest_version,
+      updateAvailable,
+      updateInfo: updateAvailable ? manifest : null
+    };
+  } catch (error) {
+    console.error('Error checking for updates:', error);
+    return {
+      current: CURRENT_VERSION,
+      latest: null,
+      updateAvailable: false,
+      updateInfo: null
+    };
+  }
+}
 
 // Interface for socket with user data
 interface SocketWithUser extends Socket {
@@ -44,6 +94,12 @@ interface SystemMetrics {
     cores: number;
     usage: number;
   };
+  version: {
+    current: string;
+    latest: string | null;
+    updateAvailable: boolean;
+    updateInfo: UpdateManifest | null;
+  };
   timestamp: number;
 }
 
@@ -61,6 +117,9 @@ async function getSystemMetrics(): Promise<SystemMetrics> {
   // Get CPU usage using node-os-utils
   const cpuUsage = await osUtils.cpu.usage();
   
+  // Get version information
+  const versionInfo = await checkForUpdates();
+  
   return {
     uptime: os.uptime(),
     memory: {
@@ -74,6 +133,7 @@ async function getSystemMetrics(): Promise<SystemMetrics> {
       cores: os.cpus().length,
       usage: cpuUsage
     },
+    version: versionInfo,
     timestamp: Date.now()
   };
 }
@@ -84,6 +144,14 @@ async function getSystemMetrics(): Promise<SystemMetrics> {
 export function configureSocketHandlers(io: Server): void {
   // Start system-wide metrics broadcast
   const METRICS_INTERVAL = 5000; // 5 seconds
+  
+  // Start update checker if not already running
+  if (!updateCheckInterval) {
+    updateCheckInterval = setInterval(async () => {
+      const metrics = await getSystemMetrics();
+      io.emit('system_metrics', metrics);
+    }, UPDATE_CHECK_INTERVAL);
+  }
   
   io.on('connection', (socket: Socket) => {
     const userSocket = socket as SocketWithUser;
@@ -108,24 +176,28 @@ export function configureSocketHandlers(io: Server): void {
           throw new Error('Potentially dangerous command denied');
         }
 
-        const { stdout, stderr } = await execPromise(command);
+        // Set the correct working directory and shell options
+        const options = {
+          cwd: process.cwd(),
+          shell: process.platform === 'win32' ? 'powershell.exe' : '/bin/bash'
+        };
+
+        const { stdout, stderr } = await execPromise(command, options);
         
         const response: CommandResponse = {
           success: true,
-          output: stdout || 'Command executed successfully with no output'
+          output: stdout || stderr || 'Command executed with no output',
+          error: stderr || undefined
         };
-        
-        if (stderr) {
-          response.error = stderr;
-        }
         
         callback(response);
       } catch (error) {
         console.error('Command execution error:', error);
+        const errorMessage = error instanceof Error ? error.message : 'Unknown error';
         callback({
           success: false,
-          output: '',
-          error: error instanceof Error ? error.message : 'Unknown error'
+          output: errorMessage,
+          error: errorMessage
         });
       }
     });

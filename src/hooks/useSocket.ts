@@ -40,6 +40,17 @@ interface SystemMetrics {
     cores: number;
     usage: number;
   };
+  version: {
+    current: string;
+    latest: string | null;
+    updateAvailable: boolean;
+    updateInfo: {
+      latest_version: string;
+      repository_url: string;
+      changelog: string;
+      required: boolean;
+    } | null;
+  };
   timestamp: number;
 }
 

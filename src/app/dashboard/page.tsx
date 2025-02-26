@@ -18,6 +18,13 @@ interface SystemInfo {
   load: number[];
 }
 
+// Command result interface
+interface CommandResult {
+  success: boolean;
+  output: string;
+  error?: string;
+}
+
 export default function DashboardPage() {
   const router = useRouter();
   const [isAuthenticated, setIsAuthenticated] = useState(false);
@@ -26,6 +33,7 @@ export default function DashboardPage() {
   const [commandOutput, setCommandOutput] = useState<string>('');
   const [command, setCommand] = useState<string>('');
   const [isExecuting, setIsExecuting] = useState(false);
+  const [isUpdating, setIsUpdating] = useState(false);
   
   // Get socket connection with metrics
   const { isConnected, error: socketError, executeCommand, metrics } = useSocket();
@@ -82,12 +90,51 @@ export default function DashboardPage() {
     setIsExecuting(true);
     try {
       const result = await executeCommand(command);
-      setCommandOutput(prev => `${prev}\n\n$ ${command}\n${result.output || 'Command executed successfully'}`);
+      setCommandOutput(prev => 
+        `${prev}\n\n$ ${command}${
+          result.error 
+            ? `\nError: ${result.error}` 
+            : `\n${result.output}`
+        }`
+      );
       setCommand('');
     } catch (error) {
-      setCommandOutput(prev => `${prev}\n\n$ ${command}\nError: ${(error as Error).message}`);
+      setCommandOutput(prev => 
+        `${prev}\n\n$ ${command}\nError: ${(error as Error).message}`
+      );
     } finally {
       setIsExecuting(false);
+    }
+  };
+
+  const handleUpdate = async () => {
+    if (!isConnected || !metrics?.version.updateAvailable) return;
+    
+    setIsUpdating(true);
+    try {
+      // Execute git pull to update the codebase
+      const result = await executeCommand('git pull');
+      if (result.error) {
+        throw new Error(result.error);
+      }
+      
+      // Rebuild the application after update
+      const buildResult = await executeCommand('npm run build');
+      if (buildResult.error) {
+        throw new Error(buildResult.error);
+      }
+      
+      // Restart the service
+      const restartResult = await executeCommand('sudo systemctl restart nanos-dashboard.service');
+      if (restartResult.error) {
+        throw new Error(restartResult.error);
+      }
+      
+      setCommandOutput(prev => `${prev}\n\nUpdate installed successfully. The service will restart momentarily.`);
+    } catch (error) {
+      setCommandOutput(prev => `${prev}\n\nUpdate failed: ${(error as Error).message}`);
+    } finally {
+      setIsUpdating(false);
     }
   };
 
@@ -190,6 +237,55 @@ export default function DashboardPage() {
               <div className="backdrop-blur-sm bg-black/20 p-3 rounded-lg border border-amber-500/10">
                 <span className="text-amber-400/70 text-sm font-mono">System Uptime</span>
                 <p className="text-amber-100 font-mono">{formatUptime(systemInfo.uptime)}</p>
+              </div>
+            </div>
+          )}
+          
+          {/* Version Information */}
+          {metrics && (
+            <div className="mt-6">
+              <div className="backdrop-blur-sm bg-black/20 p-3 rounded-lg border border-amber-500/10">
+                <span className="text-amber-400/70 text-sm font-mono">Version</span>
+                <div className="flex items-center justify-between">
+                  <p className="text-amber-100 font-mono">
+                    {metrics.version.current}
+                    {metrics.version.updateAvailable && (
+                      <span className="ml-2 text-xs text-amber-400">
+                        (Latest: {metrics.version.latest})
+                      </span>
+                    )}
+                  </p>
+                  {metrics.version.updateAvailable && (
+                    <button
+                      type="button"
+                      onClick={handleUpdate}
+                      disabled={isUpdating || !isConnected}
+                      className="px-3 py-1 bg-amber-500/20 text-amber-300 rounded hover:bg-amber-500/30 focus:outline-none focus:ring-2 focus:ring-amber-500/50 disabled:opacity-50 transition-all duration-200 text-sm font-mono flex items-center"
+                    >
+                      {isUpdating ? (
+                        <>
+                          <span className="w-2 h-2 mr-2 bg-amber-400 rounded-full animate-pulse" />
+                          Updating...
+                        </>
+                      ) : (
+                        <>
+                          <span className="mr-2">⟳</span>
+                          Update
+                        </>
+                      )}
+                    </button>
+                  )}
+                </div>
+                {metrics.version.updateInfo?.changelog && (
+                  <div className="mt-2 text-xs text-amber-400/70 font-mono">
+                    <div className="border-t border-amber-500/10 pt-2 mt-2">
+                      <strong>Changelog:</strong>
+                      <pre className="mt-1 whitespace-pre-wrap">
+                        {metrics.version.updateInfo.changelog}
+                      </pre>
+                    </div>
+                  </div>
+                )}
               </div>
             </div>
           )}

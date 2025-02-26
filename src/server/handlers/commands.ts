@@ -1,6 +1,6 @@
-import { Router, Request, Response } from 'express';
-import { exec } from 'child_process';
-import { promisify } from 'util';
+import { Router, type Request, type Response } from 'express';
+import { exec } from 'node:child_process';
+import { promisify } from 'node:util';
 
 // Define interface for user in request
 interface RequestWithUser extends Request {
