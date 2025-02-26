@@ -75,46 +75,107 @@ export default function NanosOnboarding() {
       setInstallationProgress(10);
       addLogMessage('> Adding multiverse repository...');
       const addRepo = await executeCommand('sudo add-apt-repository multiverse -y');
-      if (addRepo.error) throw new Error(addRepo.error);
+      if (addRepo.error) {
+        addLogMessage(`Error: ${addRepo.error}`);
+        throw new Error(addRepo.error);
+      }
+      addLogMessage(addRepo.output);
 
       setInstallationProgress(20);
       addLogMessage('> Adding i386 architecture...');
       const addArch = await executeCommand('sudo dpkg --add-architecture i386');
-      if (addArch.error) throw new Error(addArch.error);
+      if (addArch.error) {
+        addLogMessage(`Error: ${addArch.error}`);
+        throw new Error(addArch.error);
+      }
+      addLogMessage(addArch.output);
 
       setInstallationProgress(30);
       addLogMessage('> Updating package lists...');
       const aptUpdate = await executeCommand('sudo apt update');
-      if (aptUpdate.error) throw new Error(aptUpdate.error);
+      if (aptUpdate.error) {
+        addLogMessage(`Error: ${aptUpdate.error}`);
+        throw new Error(aptUpdate.error);
+      }
+      addLogMessage(aptUpdate.output);
 
       setInstallationProgress(40);
       addLogMessage('> Installing required dependencies...');
-      const installDeps = await executeCommand('sudo apt install -y lib32gcc-s1 steamcmd');
-      if (installDeps.error) throw new Error(installDeps.error);
+      // Using expect-like syntax to handle interactive prompts
+      const installDeps = await executeCommand('DEBIAN_FRONTEND=noninteractive sudo -E apt install -y lib32gcc-s1 steamcmd');
+      if (installDeps.error) {
+        addLogMessage(`Error: ${installDeps.error}`);
+        throw new Error(installDeps.error);
+      }
+      addLogMessage(installDeps.output);
 
       setInstallationProgress(50);
       addLogMessage('> Creating installation directory...');
       const installDir = '/opt/nanos-world-server';
       const createDir = await executeCommand(`sudo mkdir -p ${installDir}`);
-      if (createDir.error) throw new Error(createDir.error);
+      if (createDir.error) {
+        addLogMessage(`Error: ${createDir.error}`);
+        throw new Error(createDir.error);
+      }
+      addLogMessage(createDir.output);
 
       const setPerms = await executeCommand(`sudo chown -R $USER:$USER ${installDir}`);
-      if (setPerms.error) throw new Error(setPerms.error);
+      if (setPerms.error) {
+        addLogMessage(`Error: ${setPerms.error}`);
+        throw new Error(setPerms.error);
+      }
+      addLogMessage(setPerms.output);
 
       setInstallationProgress(60);
       addLogMessage('> Downloading Nanos World Server...');
-      // Prepare SteamCMD command based on version
-      const steamCmd = selectedVersion === 'standard' 
-        ? `steamcmd +force_install_dir ${installDir} +login anonymous +app_update 1936830 validate +quit`
-        : `steamcmd +force_install_dir ${installDir} +login anonymous +app_update "1936830 -beta bleeding-edge" validate +quit`;
+      // Using script to handle SteamCMD interactive prompts
+      const steamCmdScript = `#!/bin/bash
+echo "Creating SteamCMD script..."
+cat << EOF > /tmp/steamcmd_script.txt
+@ShutdownOnFailedCommand 1
+@NoPromptForPassword 1
+force_install_dir ${installDir}
+login anonymous
+app_update ${selectedVersion === 'standard' ? '1936830' : '1936830 -beta bleeding-edge'} validate
+quit
+EOF
+
+echo "Running SteamCMD with script..."
+steamcmd +runscript /tmp/steamcmd_script.txt
+`;
       
-      const installServer = await executeCommand(steamCmd);
-      if (installServer.error) throw new Error(installServer.error);
+      // Save and execute the script
+      const createScript = await executeCommand('cat << EOF > /tmp/install_nanos.sh\n' + steamCmdScript + '\nEOF');
+      if (createScript.error) {
+        addLogMessage(`Error creating install script: ${createScript.error}`);
+        throw new Error(createScript.error);
+      }
+      
+      const chmodScript = await executeCommand('chmod +x /tmp/install_nanos.sh');
+      if (chmodScript.error) {
+        addLogMessage(`Error setting script permissions: ${chmodScript.error}`);
+        throw new Error(chmodScript.error);
+      }
+      
+      addLogMessage('> Starting SteamCMD download (this may take a while)...');
+      const installServer = await executeCommand('/tmp/install_nanos.sh');
+      if (installServer.error) {
+        addLogMessage(`Error during server installation: ${installServer.error}`);
+        throw new Error(installServer.error);
+      }
+      addLogMessage(installServer.output);
 
       setInstallationProgress(90);
       addLogMessage('> Setting up permissions...');
       const makeExecutable = await executeCommand(`chmod +x ${installDir}/NanosWorldServer.sh`);
-      if (makeExecutable.error) throw new Error(makeExecutable.error);
+      if (makeExecutable.error) {
+        addLogMessage(`Error: ${makeExecutable.error}`);
+        throw new Error(makeExecutable.error);
+      }
+      addLogMessage(makeExecutable.output);
+
+      // Cleanup temporary files
+      await executeCommand('rm -f /tmp/steamcmd_script.txt /tmp/install_nanos.sh');
 
       setInstallationProgress(100);
       addLogMessage('> Installation complete!');
