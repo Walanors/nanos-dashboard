@@ -54,7 +54,9 @@ export default function ServerConfiguration() {
     setIsLoading(true);
     setError(null);
     try {
+
       const result = await executeCommand(`sudo cat ${NANOS_INSTALL_DIR}/Config.toml`);
+      console.log('Checking result', result);
       if (result.error) {
         throw new Error(result.error);
       }
