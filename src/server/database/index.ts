@@ -171,7 +171,7 @@ export function updateLastLogin(username: string): boolean {
 // Server config functions
 export function getServerConfig(): ServerConfig | null {
   const stmt = db.prepare('SELECT config_json FROM server_config WHERE id = 1');
-  const result = stmt.get();
+  const result = stmt.get() as { config_json: string } | undefined;
   
   if (!result) {
     return null;

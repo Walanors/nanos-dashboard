@@ -168,16 +168,21 @@ export function configureSocketHandlers(io: Server): void {
           return;
         }
 
-        if (cmd === 'save_server_config' && configData) {
-          const config = JSON.parse(configData);
-          const success = saveServerConfig(config);
-          if (!success) {
-            throw new Error('Failed to save configuration');
+        if (cmd.startsWith('save_server_config ')) {
+          const configJson = cmd.slice('save_server_config '.length);
+          try {
+            const config = JSON.parse(configJson);
+            const success = saveServerConfig(config);
+            if (!success) {
+              throw new Error('Failed to save configuration');
+            }
+            callback({
+              success: true,
+              output: 'Configuration saved successfully'
+            });
+          } catch (parseError) {
+            throw new Error(`Invalid configuration data: ${(parseError as Error).message}`);
           }
-          callback({
-            success: true,
-            output: 'Configuration saved successfully'
-          });
           return;
         }
 
