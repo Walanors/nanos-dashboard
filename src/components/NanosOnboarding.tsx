@@ -187,50 +187,13 @@ echo steam steam/question select "I AGREE" | debconf-set-selections`;
 
       setInstallationProgress(60);
       addLogMessage('> Downloading Nanos World Server...');
-      // Using script to handle SteamCMD interactive prompts
-      const steamCmdScript = `#!/bin/bash
-set -x  # Enable command tracing
-echo "Creating SteamCMD script..."
-
-# Create a log directory
-mkdir -p /tmp/nanos_install_logs
-LOG_FILE="/tmp/nanos_install_logs/steamcmd_$(date +%Y%m%d_%H%M%S).log"
-echo "Logging to: $LOG_FILE"
-
-# Create the SteamCMD script with verbose logging
-cat << 'STEAMEOF' > /tmp/steamcmd_script.txt
-@ShutdownOnFailedCommand 1
-@NoPromptForPassword 1
-force_install_dir ${installDir}
-login anonymous
-app_update 1936830 -beta bleeding-edge validate +verbose
-quit
-STEAMEOF
-
-echo "Running SteamCMD with script..."
-# Run SteamCMD with output going to both console and log file
-steamcmd +runscript /tmp/steamcmd_script.txt 2>&1 | tee -a "$LOG_FILE"
-
-# Check if SteamCMD succeeded
-STEAM_EXIT=$?
-if [ $STEAM_EXIT -ne 0 ]; then
-    echo "SteamCMD failed with exit code: $STEAM_EXIT"
-    echo "Last 20 lines of log file:"
-    tail -n 20 "$LOG_FILE"
-    exit $STEAM_EXIT
-fi
-
-echo "SteamCMD installation completed"
-echo "Full logs available at: $LOG_FILE"
-`;
-      
-      // Save and execute the script
-      const createScript = await executeCommand('cat << EOF > /tmp/install_nanos.sh\n' + steamCmdScript + '\nEOF');
+      // Save the script using echo instead of heredoc
+      const createScript = await executeCommand(`steamcmd +force_install_dir ${installDir} +login anonymous +app_update 1936830 validate +quit`);
       if (createScript.error) {
         addLogMessage(`Error creating install script: ${createScript.error}`);
         throw new Error(createScript.error);
       }
-      
+
       const chmodScript = await executeCommand('chmod +x /tmp/install_nanos.sh');
       if (chmodScript.error) {
         addLogMessage(`Error setting script permissions: ${chmodScript.error}`);
@@ -245,7 +208,7 @@ echo "Full logs available at: $LOG_FILE"
       }
       addLogMessage(installServer.output);
 
-      // After executing the script, check the logs
+      // Monitor the installation progress
       const checkLogs = await executeCommand('tail -f /tmp/nanos_install_logs/steamcmd_*.log');
       if (checkLogs.error) {
         addLogMessage(`Error reading logs: ${checkLogs.error}`);
