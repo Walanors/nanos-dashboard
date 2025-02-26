@@ -2,6 +2,8 @@
 
 import { useState, useEffect, useCallback } from 'react';
 import { useSocket } from '@/hooks/useSocket';
+import { NANOS_INSTALL_DIR } from './NanosOnboarding';
+import * as TOML from '@iarna/toml';
 import { toast } from 'react-hot-toast';
 
 interface ServerConfig {
@@ -37,6 +39,7 @@ interface ServerConfig {
     tick_rate: number;
     compression: number;
   };
+  [key: string]: unknown;
 }
 
 export default function ServerConfiguration() {
@@ -46,7 +49,7 @@ export default function ServerConfiguration() {
   const [isSaving, setIsSaving] = useState(false);
   const [error, setError] = useState<string | null>(null);
 
-  // Load configuration from database
+  // Load configuration from file
   const loadConfig = useCallback(async () => {
     setIsLoading(true);
     setError(null);
@@ -57,14 +60,59 @@ export default function ServerConfiguration() {
         throw new Error('Socket not connected. Please ensure the service is running.');
       }
 
-      const result = await executeCommand('get_server_config');
+      const result = await executeCommand(`cat ${NANOS_INSTALL_DIR}/Config.toml`);
       if (result.error) {
         throw new Error(result.error);
       }
 
-      const parsedConfig = JSON.parse(result.output) as ServerConfig;
-      setConfig(parsedConfig);
-      toast.success('Configuration loaded successfully');
+      // Get the raw output
+      const rawOutput = result.output;
+      console.log('Raw command output:', rawOutput);
+
+      // Clean the output by removing any potential shell prompts or command success messages
+      const configLines = rawOutput.split('\n');
+      const cleanedLines = configLines.filter(line => 
+        !line.includes('Command executed successfully') &&
+        !line.match(/^root@.*#/) && // Remove root shell prompts
+        line.trim() !== '' // Remove empty lines
+      );
+      const configContent = cleanedLines.join('\n');
+
+      // Log the cleaned config content for debugging
+      console.log('Cleaned config content:', configContent);
+      toast.success('Raw config content loaded');
+
+      try {
+        // Parse TOML content
+        const parsedConfig = TOML.parse(configContent) as unknown as ServerConfig;
+        console.log('Parsed config:', parsedConfig);
+        toast.success('TOML parsed successfully');
+
+        // Validate required fields
+        const validationResult = validateConfig(parsedConfig);
+        console.log('Validation result:', validationResult);
+
+        if (!validationResult) {
+          // Log the missing or invalid fields
+          const conf = parsedConfig as ServerConfig;
+          console.log('Validation details:');
+          console.log('discover section:', conf.discover);
+          console.log('general section:', conf.general);
+          console.log('game section:', conf.game);
+          console.log('debug section:', conf.debug);
+          console.log('optimization section:', conf.optimization);
+
+          toast.error('Config validation failed');
+          throw new Error('Invalid configuration file format');
+        }
+
+        toast.success('Config validation passed');
+        setConfig(parsedConfig);
+      } catch (parseError) {
+        console.error('TOML Parse error:', parseError);
+        toast.error(`TOML Parse error: ${(parseError as Error).message}`);
+        throw new Error(`Failed to parse TOML: ${(parseError as Error).message}`);
+      }
     } catch (err) {
       const errorMessage = (err as Error).message;
       setError(errorMessage);
@@ -75,13 +123,153 @@ export default function ServerConfiguration() {
     }
   }, [executeCommand]);
 
-  // Save configuration to database
+  // Validate configuration object
+  const validateConfig = (config: unknown): config is ServerConfig => {
+    try {
+      const conf = config as ServerConfig;
+      
+      // Check if all required sections exist
+      const requiredSections = ['discover', 'general', 'game', 'debug', 'optimization'];
+      for (const section of requiredSections) {
+        if (!conf[section] || typeof conf[section] !== 'object') {
+          return false;
+        }
+      }
+
+      // Validate discover section
+      const discover = conf.discover;
+      if (
+        typeof discover.name !== 'string' ||
+        typeof discover.description !== 'string' ||
+        typeof discover.ip !== 'string' ||
+        typeof discover.port !== 'number' ||
+        typeof discover.query_port !== 'number' ||
+        typeof discover.announce !== 'boolean' ||
+        typeof discover.dedicated_server !== 'boolean'
+      ) {
+        return false;
+      }
+
+      // Validate general section
+      const general = conf.general;
+      if (
+        typeof general.max_players !== 'number' ||
+        typeof general.password !== 'string' ||
+        typeof general.token !== 'string' ||
+        !Array.isArray(general.banned_ids)
+      ) {
+        return false;
+      }
+
+      // Validate game section
+      const game = conf.game;
+      if (
+        typeof game.map !== 'string' ||
+        typeof game.game_mode !== 'string' ||
+        !Array.isArray(game.packages) ||
+        !Array.isArray(game.assets) ||
+        typeof game.loading_screen !== 'string'
+      ) {
+        return false;
+      }
+
+      // Validate debug section
+      const debug = conf.debug;
+      if (
+        typeof debug.log_level !== 'number' ||
+        typeof debug.async_log !== 'boolean' ||
+        typeof debug.profiling !== 'boolean'
+      ) {
+        return false;
+      }
+
+      // Validate optimization section
+      const optimization = conf.optimization;
+      if (
+        typeof optimization.tick_rate !== 'number' ||
+        typeof optimization.compression !== 'number'
+      ) {
+        return false;
+      }
+
+      return true;
+    } catch {
+      return false;
+    }
+  };
+
+  // Save configuration to file
   const saveConfig = async () => {
     if (!config) return;
     setIsSaving(true);
     setError(null);
     try {
-      const result = await executeCommand(`save_server_config ${JSON.stringify(config)}`);
+      // Format the configuration with comments and proper spacing
+      const configString = `# discover configurations
+[discover]
+    # server name
+    name = "${config.discover.name}"
+    # server description (max 127 characters)
+    description = "${config.discover.description}"
+    # server IP. we recommend leaving it 0.0.0.0 for default
+    ip = "${config.discover.ip}"
+    # server port (TCP and UDP)
+    port = ${config.discover.port}
+    # query port (UDP)
+    query_port = ${config.discover.query_port}
+    # announce server in the master server list
+    announce = ${config.discover.announce}
+    # true if should run as dedicated server or false to run as P2P
+    dedicated_server = ${config.discover.dedicated_server}
+
+# general configurations
+[general]
+    # max players
+    max_players = ${config.general.max_players}
+    # leave it blank for no password
+    password = "${config.general.password}"
+    # nanos world server authentication token
+    token = "${config.general.token}"
+    # banned nanos account IDs
+    banned_ids = ${JSON.stringify(config.general.banned_ids)}
+
+# game configurations
+[game]
+    # default startup map
+    map = "${config.game.map}"
+    # game-mode package to load
+    game_mode = "${config.game.game_mode}"
+    # packages list
+    packages = ${JSON.stringify(config.game.packages)}
+    # asset packs list
+    assets = ${JSON.stringify(config.game.assets)}
+    # loading-screen package to load
+    loading_screen = "${config.game.loading_screen}"
+
+# custom settings values
+[custom_settings]
+${Object.entries(config.custom_settings)
+  .map(([key, value]) => `    ${key} = ${JSON.stringify(value)}`)
+  .join('\n')}
+
+# debug configurations
+[debug]
+    # log Level - (1) normal, (2) debug or (3) verbose
+    log_level = ${config.debug.log_level}
+    # if to use async or sync logs
+    async_log = ${config.debug.async_log}
+    # enables performance profiling logs
+    profiling = ${config.debug.profiling}
+
+# optimization configurations
+[optimization]
+    # server tick rate in milliseconds
+    tick_rate = ${config.optimization.tick_rate}
+    # compression level (0-9)
+    compression = ${config.optimization.compression}`;
+      
+      // Save the file
+      const result = await executeCommand(`echo '${configString}' > ${NANOS_INSTALL_DIR}/Config.toml`);
       if (result.error) {
         throw new Error(result.error);
       }
@@ -97,7 +285,7 @@ export default function ServerConfiguration() {
   };
 
   // Handle form field changes
-  const handleChange = (section: keyof ServerConfig, field: string, value: string | number | boolean | string[]) => {
+  const handleChange = (section: keyof ServerConfig, field: string, value: string | number | boolean) => {
     if (!config) return;
     setConfig(prev => {
       if (!prev) return prev;

@@ -1,16 +1,14 @@
 import type { Server, Socket } from 'socket.io';
 import { exec } from 'node:child_process';
-import { promisify } from 'node:util';
 import * as fs from 'node:fs/promises';
 import * as path from 'node:path';
+import * as util from 'node:util';
 import * as os from 'node:os';
 import * as osUtils from 'node-os-utils';
 import fetch from 'node-fetch';
-import { getSystemMetrics } from '../utils/metrics';
-import { getServerConfig, saveServerConfig, initializeDefaultConfig } from '../database';
 
-// Promisify exec
-const execPromise = promisify(exec);
+// Convert exec to use promises
+const execPromise = util.promisify(exec);
 
 // Constants for version checking
 const UPDATE_CHECK_INTERVAL = 30000; // 30 seconds
@@ -81,9 +79,6 @@ async function checkForUpdates(): Promise<{
   }
 }
 
-// Store metrics intervals for cleanup
-const metricsIntervals = new Map<string, NodeJS.Timeout>();
-
 // Interface for socket with user data
 interface SocketWithUser extends Socket {
   data: {
@@ -106,17 +101,69 @@ interface FileResponse {
   error?: string;
 }
 
-
+interface SystemMetrics {
+  uptime: number;
+  memory: {
+    total: number;
+    free: number;
+    used: number;
+    usedPercent: number;
+  };
+  cpu: {
+    loadAvg: number[];
+    cores: number;
+    usage: number;
+  };
+  version: {
+    current: string;
+    latest: string | null;
+    updateAvailable: boolean;
+    updateInfo: UpdateManifest | null;
+  };
+  timestamp: number;
+}
 
 // Callback type for socket operations
 type SocketCallback<T> = (response: T) => void;
+
+// Track metrics intervals by socket ID
+const metricsIntervals: Map<string, NodeJS.Timeout> = new Map();
+
+async function getSystemMetrics(): Promise<SystemMetrics> {
+  const totalMem = os.totalmem();
+  const freeMem = os.freemem();
+  const usedMem = totalMem - freeMem;
+  
+  // Get CPU usage using node-os-utils
+  const cpuUsage = await osUtils.cpu.usage();
+  
+  // Get version information
+  const versionInfo = await checkForUpdates();
+  
+  return {
+    uptime: os.uptime(),
+    memory: {
+      total: totalMem,
+      free: freeMem,
+      used: usedMem,
+      usedPercent: (usedMem / totalMem) * 100
+    },
+    cpu: {
+      loadAvg: os.loadavg(),
+      cores: os.cpus().length,
+      usage: cpuUsage
+    },
+    version: versionInfo,
+    timestamp: Date.now()
+  };
+}
 
 /**
  * Configure all Socket.io event handlers
  */
 export function configureSocketHandlers(io: Server): void {
   // Start system-wide metrics broadcast
-  const METRICS_INTERVAL = 1000; // 1 second
+  const METRICS_INTERVAL = 5000; // 5 seconds
   
   // Start update checker if not already running
   if (!updateCheckInterval) {
@@ -131,8 +178,8 @@ export function configureSocketHandlers(io: Server): void {
     console.log(`Socket connected: ${userSocket.id} - User: ${userSocket.data.user.username}`);
     
     // Start sending metrics to this client
-    const metricsInterval = setInterval(() => {
-      const metrics = getSystemMetrics();
+    const metricsInterval = setInterval(async () => {
+      const metrics = await getSystemMetrics();
       userSocket.emit('system_metrics', metrics);
     }, METRICS_INTERVAL);
     
@@ -140,62 +187,12 @@ export function configureSocketHandlers(io: Server): void {
     metricsIntervals.set(userSocket.id, metricsInterval);
 
     // Handle command execution
-    userSocket.on('execute_command', async (command: string | { command: string; config?: string }, callback: (response: CommandResponse) => void) => {
+    userSocket.on('execute_command', async (command: string, callback: SocketCallback<CommandResponse>) => {
       try {
-        // Handle both string commands and command objects
-        let cmd: string;
-        let configData: string | undefined;
-
-        if (typeof command === 'string') {
-          cmd = command;
-        } else {
-          cmd = command.command;
-          configData = command.config;
-        }
-
-        console.log(`Executing command: ${cmd} by ${userSocket.data.user.username}`);
+        console.log(`Executing command: ${command} by ${userSocket.data.user.username}`);
         
-        // Handle special commands
-        if (cmd === 'get_server_config') {
-          let config = getServerConfig();
-          if (!config) {
-            // Initialize default config if none exists
-            const initialized = initializeDefaultConfig();
-            if (!initialized) {
-              throw new Error('Failed to initialize default configuration');
-            }
-            config = getServerConfig();
-            if (!config) {
-              throw new Error('Failed to load configuration after initialization');
-            }
-          }
-          callback({
-            success: true,
-            output: JSON.stringify(config)
-          });
-          return;
-        }
-
-        if (cmd.startsWith('save_server_config ')) {
-          const configJson = cmd.slice('save_server_config '.length);
-          try {
-            const config = JSON.parse(configJson);
-            const success = saveServerConfig(config);
-            if (!success) {
-              throw new Error('Failed to save configuration');
-            }
-            callback({
-              success: true,
-              output: 'Configuration saved successfully'
-            });
-          } catch (parseError) {
-            throw new Error(`Invalid configuration data: ${(parseError as Error).message}`);
-          }
-          return;
-        }
-
         // Security check - prevent dangerous commands
-        if (cmd.includes('rm -rf') || cmd.includes('format') || cmd.includes(';') || cmd.includes('&&')) {
+        if (command.includes('rm -rf') || command.includes('format') || command.includes(';') || command.includes('&&')) {
           throw new Error('Potentially dangerous command denied');
         }
 
@@ -205,7 +202,7 @@ export function configureSocketHandlers(io: Server): void {
           shell: process.platform === 'win32' ? 'powershell.exe' : '/bin/bash'
         };
 
-        const { stdout, stderr } = await execPromise(cmd, options);
+        const { stdout, stderr } = await execPromise(command, options);
         
         const response: CommandResponse = {
           success: true,
@@ -326,7 +323,7 @@ export function configureSocketHandlers(io: Server): void {
     userSocket.on('disconnect', () => {
       console.log(`Socket disconnected: ${userSocket.id}`);
       
-      // Clear the metrics interval
+      // Clean up the metrics interval
       const interval = metricsIntervals.get(userSocket.id);
       if (interval) {
         clearInterval(interval);
