@@ -77,6 +77,8 @@ interface ServerConfig {
   profiling: boolean;
   tickRate: number;
   compression: number;
+  port: number;
+  queryPort: number;
 }
 
 export default function NanosOnboarding() {
@@ -96,7 +98,9 @@ export default function NanosOnboarding() {
     asyncLog: true,
     profiling: false,
     tickRate: 33,
-    compression: 0
+    compression: 0,
+    port: 7777,
+    queryPort: 7778
   });
   
   // Function to handle next step
@@ -276,6 +280,12 @@ export default function NanosOnboarding() {
       case 'compression':
         configContent = configContent.replace(/compression = \d+/g, `compression = ${processedValue}`);
         break;
+      case 'port':
+        configContent = configContent.replace(/port = \d+/g, `port = ${processedValue}`);
+        break;
+      case 'queryPort':
+        configContent = configContent.replace(/query_port = \d+/g, `query_port = ${processedValue}`);
+        break;
     }
 
     // Write updated config back to file
@@ -305,6 +315,8 @@ export default function NanosOnboarding() {
     const profiling = config.match(/profiling = (\w+)/)?.[1] === 'true';
     const tickRate = Number.parseInt(config.match(/tick_rate = (\d+)/)?.[1] || "33", 10);
     const compression = Number.parseInt(config.match(/compression = (\d+)/)?.[1] || "0", 10);
+    const port = Number.parseInt(config.match(/port = (\d+)/)?.[1] || "7777", 10);
+    const queryPort = Number.parseInt(config.match(/query_port = (\d+)/)?.[1] || "7778", 10);
 
     // Update state with values from config file
     setServerConfig({
@@ -316,7 +328,9 @@ export default function NanosOnboarding() {
       asyncLog,
       profiling,
       tickRate,
-      compression
+      compression,
+      port,
+      queryPort
     });
   }, [executeCommand, addLogMessage]);
 
@@ -504,6 +518,44 @@ export default function NanosOnboarding() {
             className="w-full bg-black/30 border border-amber-500/20 rounded p-2 text-gray-200 font-mono focus:outline-none focus:border-amber-500/50"
           />
         </div>
+
+        <div className="space-y-2">
+          <label htmlFor="port" className="block text-gray-300 font-mono text-sm group relative">
+            Game Port
+            <span className="opacity-0 group-hover:opacity-100 absolute left-full ml-2 px-2 py-1 bg-black/80 text-xs rounded whitespace-nowrap">
+              The port on which the server listens for game connections
+            </span>
+          </label>
+          <input
+            id="port"
+            type="number"
+            name="port"
+            value={serverConfig.port}
+            onChange={handleConfigChange}
+            min="1"
+            max="65535"
+            className="w-full bg-black/30 border border-amber-500/20 rounded p-2 text-gray-200 font-mono focus:outline-none focus:border-amber-500/50"
+          />
+        </div>
+
+        <div className="space-y-2">
+          <label htmlFor="queryPort" className="block text-gray-300 font-mono text-sm group relative">
+            Query Port
+            <span className="opacity-0 group-hover:opacity-100 absolute left-full ml-2 px-2 py-1 bg-black/80 text-xs rounded whitespace-nowrap">
+              The port on which the server listens for query connections
+            </span>
+          </label>
+          <input
+            id="queryPort"
+            type="number"
+            name="queryPort"
+            value={serverConfig.queryPort}
+            onChange={handleConfigChange}
+            min="1"
+            max="65535"
+            className="w-full bg-black/30 border border-amber-500/20 rounded p-2 text-gray-200 font-mono focus:outline-none focus:border-amber-500/50"
+          />
+        </div>
       </div>
 
       <div className="flex justify-between mt-6">
@@ -538,6 +590,7 @@ export default function NanosOnboarding() {
             </p>
             <div className="flex justify-end mt-6">
               <button
+                type="button"
                 onClick={handleNextStep}
                 className="px-4 py-2 bg-amber-500/30 text-amber-300 rounded hover:bg-amber-500/40 transition-colors font-mono"
               >
@@ -557,10 +610,11 @@ export default function NanosOnboarding() {
             
             <div className="space-y-3">
               {NANOS_VERSIONS.map(version => (
-                <div
+                <button
+                  type="button"
                   key={version.id}
                   onClick={() => handleVersionSelect(version.id)}
-                  className={`p-4 rounded-lg cursor-pointer transition-all ${
+                  className={`w-full p-4 rounded-lg cursor-pointer transition-all text-left ${
                     selectedVersion === version.id
                       ? 'bg-amber-500/30 border border-amber-500/50'
                       : 'bg-black/30 border border-amber-500/10 hover:bg-black/40'
@@ -575,18 +629,20 @@ export default function NanosOnboarding() {
                       <div className="text-sm text-gray-400">{version.description}</div>
                     </div>
                   </div>
-                </div>
+                </button>
               ))}
             </div>
             
             <div className="flex justify-between mt-6">
               <button
+                type="button"
                 onClick={handlePrevStep}
                 className="px-4 py-2 bg-gray-800/50 text-gray-300 rounded hover:bg-gray-800/70 transition-colors font-mono"
               >
                 &lt; Back
               </button>
               <button
+                type="button"
                 onClick={handleNextStep}
                 className="px-4 py-2 bg-amber-500/30 text-amber-300 rounded hover:bg-amber-500/40 transition-colors font-mono"
               >
@@ -604,7 +660,7 @@ export default function NanosOnboarding() {
             <div className="bg-black/50 p-4 rounded-lg border border-amber-500/10 font-mono text-sm">
               <div className="h-64 overflow-y-auto space-y-1 mb-4">
                 {installationLog.map((log, index) => (
-                  <div key={index} className="text-gray-300">{log}</div>
+                  <div key={`log-${index}-${log.slice(0, 10)}`} className="text-gray-300">{log}</div>
                 ))}
                 {isInstalling && (
                   <div className="text-amber-400 animate-pulse">_</div>
@@ -615,7 +671,7 @@ export default function NanosOnboarding() {
                 <div 
                   className="bg-amber-500 h-2.5 rounded-full transition-all duration-300" 
                   style={{ width: `${installationProgress}%` }}
-                ></div>
+                />
               </div>
               <div className="text-right text-xs text-gray-400 mt-1">
                 {installationProgress}% Complete
@@ -624,6 +680,7 @@ export default function NanosOnboarding() {
             
             <div className="flex justify-between mt-6">
               <button
+                type="button"
                 onClick={handlePrevStep}
                 disabled={isInstalling}
                 className="px-4 py-2 bg-gray-800/50 text-gray-300 rounded hover:bg-gray-800/70 transition-colors font-mono disabled:opacity-50"
@@ -633,6 +690,7 @@ export default function NanosOnboarding() {
               
               {installationProgress < 100 ? (
                 <button
+                  type="button"
                   onClick={handleStartInstallation}
                   disabled={isInstalling}
                   className="px-4 py-2 bg-amber-500/30 text-amber-300 rounded hover:bg-amber-500/40 transition-colors font-mono disabled:opacity-50"
@@ -641,6 +699,7 @@ export default function NanosOnboarding() {
                 </button>
               ) : (
                 <button
+                  type="button"
                   onClick={handleNextStep}
                   className="px-4 py-2 bg-amber-500/30 text-amber-300 rounded hover:bg-amber-500/40 transition-colors font-mono"
                 >
@@ -681,12 +740,14 @@ export default function NanosOnboarding() {
             
             <div className="flex justify-between mt-6">
               <button
+                type="button"
                 onClick={handlePrevStep}
                 className="px-4 py-2 bg-gray-800/50 text-gray-300 rounded hover:bg-gray-800/70 transition-colors font-mono"
               >
                 &lt; Back
               </button>
               <button
+                type="button"
                 onClick={handleCompleteOnboarding}
                 className="px-4 py-2 bg-green-600/50 text-green-300 rounded hover:bg-green-600/70 transition-colors font-mono"
               >
@@ -713,8 +774,8 @@ export default function NanosOnboarding() {
     
     return (
       <div className="flex justify-between mb-8">
-        {steps.map((step, index) => (
-          <div key={index} className="flex flex-col items-center">
+        {steps.map((step) => (
+          <div key={`step-${step.step}`} className="flex flex-col items-center">
             <div 
               className={`w-8 h-8 rounded-full flex items-center justify-center ${
                 currentStep >= step.step 
@@ -722,18 +783,18 @@ export default function NanosOnboarding() {
                   : 'bg-gray-800/50 text-gray-500'
               }`}
             >
-              {index + 1}
+              {step.step + 1}
             </div>
             <div className={`text-xs mt-1 font-mono ${
               currentStep >= step.step ? 'text-amber-400' : 'text-gray-500'
             }`}>
               {step.name}
             </div>
-            {index < steps.length - 1 && (
-              <div className="absolute w-[calc(20%-2rem)] h-0.5 mt-4 ml-8" style={{ left: `${index * 20}%` }}>
+            {step.step < steps.length - 1 && (
+              <div className="absolute w-[calc(20%-2rem)] h-0.5 mt-4 ml-8" style={{ left: `${step.step * 20}%` }}>
                 <div className={`h-full ${
                   currentStep > step.step ? 'bg-amber-500/30' : 'bg-gray-800/50'
-                }`}></div>
+                }`} />
               </div>
             )}
           </div>
