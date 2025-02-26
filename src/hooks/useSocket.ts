@@ -76,9 +76,18 @@ export function useSocket() {
     }
     
     try {
-      // Decode credentials - directly use base64 string
+      // Decode base64 credentials
+      const credentialsString = atob(credentialsBase64);
+      const [username, password] = credentialsString.split(':');
+      
+      if (!username || !password) {
+        setError('Invalid credentials format');
+        return;
+      }
+      
+      // Create socket connection with credentials
       const newSocket = io({
-        auth: { credentials: credentialsBase64 },
+        auth: { username, password },
         reconnection: true,
         reconnectionAttempts: Number.POSITIVE_INFINITY,
         reconnectionDelay: 1000,
@@ -95,6 +104,12 @@ export function useSocket() {
         console.error('Socket connection error:', err.message);
         setIsConnected(false);
         setError(err.message);
+        
+        // If authentication fails, clear credentials and redirect to login
+        if (err.message === 'Authentication failed' || err.message === 'Invalid credentials') {
+          sessionStorage.removeItem('credentials');
+          window.location.href = '/';
+        }
       });
       
       newSocket.on('disconnect', (reason) => {
