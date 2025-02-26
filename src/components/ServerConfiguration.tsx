@@ -6,8 +6,48 @@ import { NANOS_INSTALL_DIR } from './NanosOnboarding';
 import * as TOML from '@iarna/toml';
 import { toast } from 'react-hot-toast';
 
+// Define the type for the TOML parser output
+interface TomlTable {
+  discover?: {
+    name?: unknown;
+    description?: unknown;
+    ip?: unknown;
+    port?: unknown;
+    query_port?: unknown;
+    announce?: unknown;
+    dedicated_server?: unknown;
+  };
+  general?: {
+    max_players?: unknown;
+    password?: unknown;
+    token?: unknown;
+    banned_ids?: unknown;
+  };
+  game?: {
+    map?: unknown;
+    game_mode?: unknown;
+    packages?: unknown;
+    assets?: unknown;
+    loading_screen?: unknown;
+  };
+  custom_settings?: Record<string, unknown>;
+  debug?: {
+    log_level?: unknown;
+    async_log?: unknown;
+    profiling?: unknown;
+  };
+  optimization?: {
+    tick_rate?: unknown;
+    compression?: unknown;
+  };
+}
+
+type ServerConfigSection<T> = {
+  [K in keyof T]: T[K];
+};
+
 interface ServerConfig {
-  discover: {
+  discover: ServerConfigSection<{
     name: string;
     description: string;
     ip: string;
@@ -15,32 +55,37 @@ interface ServerConfig {
     query_port: number;
     announce: boolean;
     dedicated_server: boolean;
-  };
-  general: {
+  }>;
+  general: ServerConfigSection<{
     max_players: number;
     password: string;
     token: string;
     banned_ids: string[];
-  };
-  game: {
+  }>;
+  game: ServerConfigSection<{
     map: string;
     game_mode: string;
     packages: string[];
     assets: string[];
     loading_screen: string;
-  };
+  }>;
   custom_settings: Record<string, unknown>;
-  debug: {
+  debug: ServerConfigSection<{
     log_level: number;
     async_log: boolean;
     profiling: boolean;
-  };
-  optimization: {
+  }>;
+  optimization: ServerConfigSection<{
     tick_rate: number;
     compression: number;
-  };
-  [key: string]: unknown;
+  }>;
 }
+
+type ParsedTomlConfig = {
+  [K in keyof ServerConfig]?: K extends 'custom_settings' 
+    ? Record<string, unknown>
+    : ServerConfig[K];
+};
 
 export default function ServerConfiguration() {
   const { executeCommand } = useSocket();
@@ -60,12 +105,12 @@ export default function ServerConfiguration() {
         throw new Error('Socket not connected. Please ensure the service is running.');
       }
 
-      const result = await executeCommand(`cat ${NANOS_INSTALL_DIR}/Config.toml`);
+      const result = await executeCommand(`cat "${NANOS_INSTALL_DIR}/Config.toml"`);
       if (result.error) {
         throw new Error(result.error);
       }
 
-      // Get the raw output
+      // Get the raw output and clean it
       const rawOutput = result.output;
       console.log('Raw command output:', rawOutput);
 
@@ -76,38 +121,113 @@ export default function ServerConfiguration() {
         !line.match(/^root@.*#/) && // Remove root shell prompts
         line.trim() !== '' // Remove empty lines
       );
-      const configContent = cleanedLines.join('\n');
-
-      // Log the cleaned config content for debugging
+      
+      // Join lines and ensure proper line endings
+      const configContent = cleanedLines.join('\n').trim();
       console.log('Cleaned config content:', configContent);
-      toast.success('Raw config content loaded');
 
       try {
-        // Parse TOML content
-        const parsedConfig = TOML.parse(configContent) as unknown as ServerConfig;
-        console.log('Parsed config:', parsedConfig);
-        toast.success('TOML parsed successfully');
+        // Parse TOML content with explicit type casting
+        const rawParsedConfig = TOML.parse(configContent) as TomlTable;
+        const parsedConfig: ParsedTomlConfig = {
+          discover: rawParsedConfig.discover ? {
+            name: String(rawParsedConfig.discover.name || ''),
+            description: String(rawParsedConfig.discover.description || ''),
+            ip: String(rawParsedConfig.discover.ip || '0.0.0.0'),
+            port: Number(rawParsedConfig.discover.port || 7777),
+            query_port: Number(rawParsedConfig.discover.query_port || 7778),
+            announce: Boolean(rawParsedConfig.discover.announce),
+            dedicated_server: Boolean(rawParsedConfig.discover.dedicated_server),
+          } : undefined,
+          general: rawParsedConfig.general ? {
+            max_players: Number(rawParsedConfig.general.max_players || 64),
+            password: String(rawParsedConfig.general.password || ''),
+            token: String(rawParsedConfig.general.token || ''),
+            banned_ids: Array.isArray(rawParsedConfig.general.banned_ids) 
+              ? rawParsedConfig.general.banned_ids.map(String)
+              : [],
+          } : undefined,
+          game: rawParsedConfig.game ? {
+            map: String(rawParsedConfig.game.map || 'default-blank-map'),
+            game_mode: String(rawParsedConfig.game.game_mode || ''),
+            packages: Array.isArray(rawParsedConfig.game.packages)
+              ? rawParsedConfig.game.packages.map(String)
+              : [],
+            assets: Array.isArray(rawParsedConfig.game.assets)
+              ? rawParsedConfig.game.assets.map(String)
+              : [],
+            loading_screen: String(rawParsedConfig.game.loading_screen || ''),
+          } : undefined,
+          custom_settings: rawParsedConfig.custom_settings || {},
+          debug: rawParsedConfig.debug ? {
+            log_level: Number(rawParsedConfig.debug.log_level || 1),
+            async_log: Boolean(rawParsedConfig.debug.async_log),
+            profiling: Boolean(rawParsedConfig.debug.profiling),
+          } : undefined,
+          optimization: rawParsedConfig.optimization ? {
+            tick_rate: Number(rawParsedConfig.optimization.tick_rate || 33),
+            compression: Number(rawParsedConfig.optimization.compression || 0),
+          } : undefined,
+        };
+        console.log('Raw parsed config:', parsedConfig);
 
-        // Validate required fields
-        const validationResult = validateConfig(parsedConfig);
+        // Convert the parsed config to our expected format with defaults
+        const typedConfig: ServerConfig = {
+          discover: {
+            name: parsedConfig.discover?.name ?? '',
+            description: parsedConfig.discover?.description ?? '',
+            ip: parsedConfig.discover?.ip ?? '0.0.0.0',
+            port: parsedConfig.discover?.port ?? 7777,
+            query_port: parsedConfig.discover?.query_port ?? 7778,
+            announce: parsedConfig.discover?.announce ?? true,
+            dedicated_server: parsedConfig.discover?.dedicated_server ?? true,
+          },
+          general: {
+            max_players: parsedConfig.general?.max_players ?? 64,
+            password: parsedConfig.general?.password ?? '',
+            token: parsedConfig.general?.token ?? '',
+            banned_ids: parsedConfig.general?.banned_ids ?? [],
+          },
+          game: {
+            map: parsedConfig.game?.map ?? 'default-blank-map',
+            game_mode: parsedConfig.game?.game_mode ?? '',
+            packages: parsedConfig.game?.packages ?? [],
+            assets: parsedConfig.game?.assets ?? [],
+            loading_screen: parsedConfig.game?.loading_screen ?? '',
+          },
+          custom_settings: parsedConfig.custom_settings ?? {},
+          debug: {
+            log_level: parsedConfig.debug?.log_level ?? 1,
+            async_log: parsedConfig.debug?.async_log ?? true,
+            profiling: parsedConfig.debug?.profiling ?? false,
+          },
+          optimization: {
+            tick_rate: parsedConfig.optimization?.tick_rate ?? 33,
+            compression: parsedConfig.optimization?.compression ?? 0,
+          },
+        };
+
+        console.log('Typed config:', typedConfig);
+
+        // Validate the typed config
+        const validationResult = validateConfig(typedConfig);
         console.log('Validation result:', validationResult);
 
         if (!validationResult) {
-          // Log the missing or invalid fields
-          const conf = parsedConfig as ServerConfig;
+          // Type assertion since we know the structure at this point
+          const config = typedConfig as ServerConfig;
           console.log('Validation details:');
-          console.log('discover section:', conf.discover);
-          console.log('general section:', conf.general);
-          console.log('game section:', conf.game);
-          console.log('debug section:', conf.debug);
-          console.log('optimization section:', conf.optimization);
+          console.log('discover section:', config.discover);
+          console.log('general section:', config.general);
+          console.log('game section:', config.game);
+          console.log('debug section:', config.debug);
+          console.log('optimization section:', config.optimization);
 
-          toast.error('Config validation failed');
-          throw new Error('Invalid configuration file format');
+          throw new Error('Invalid configuration structure after parsing');
         }
 
         toast.success('Config validation passed');
-        setConfig(parsedConfig);
+        setConfig(typedConfig);
       } catch (parseError) {
         console.error('TOML Parse error:', parseError);
         toast.error(`TOML Parse error: ${(parseError as Error).message}`);
@@ -129,9 +249,9 @@ export default function ServerConfiguration() {
       const conf = config as ServerConfig;
       
       // Check if all required sections exist
-      const requiredSections = ['discover', 'general', 'game', 'debug', 'optimization'];
+      const requiredSections = ['discover', 'general', 'game', 'debug', 'optimization'] as const;
       for (const section of requiredSections) {
-        if (!conf[section] || typeof conf[section] !== 'object') {
+        if (!conf[section as keyof ServerConfig] || typeof conf[section as keyof ServerConfig] !== 'object') {
           return false;
         }
       }
