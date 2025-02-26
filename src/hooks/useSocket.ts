@@ -76,21 +76,13 @@ export function useSocket() {
     }
     
     try {
-      // Decode credentials
-      const credentialsString = atob(credentialsBase64);
-      const [username, password] = credentialsString.split(':');
-      
-      if (!username || !password) {
-        setError('Invalid credentials format');
-        return;
-      }
-      
-      // Connect to socket with authentication
+      // Decode credentials - directly use base64 string
       const newSocket = io({
-        auth: { username, password },
+        auth: { credentials: credentialsBase64 },
         reconnection: true,
-        reconnectionAttempts: 5,
-        reconnectionDelay: 1000
+        reconnectionAttempts: Number.POSITIVE_INFINITY,
+        reconnectionDelay: 1000,
+        timeout: 20000
       });
       
       newSocket.on('connect', () => {
@@ -111,8 +103,19 @@ export function useSocket() {
       });
       
       // Listen for system metrics updates
-      newSocket.on('system_metrics', (data: SystemMetrics) => {
-        setMetrics(data);
+      newSocket.on('system_metrics', (rawData: SystemMetrics | string) => {
+        let parsedData: SystemMetrics;
+        if (typeof rawData === 'string') {
+          try {
+            parsedData = JSON.parse(rawData);
+          } catch (e) {
+            console.error('Failed to parse system metrics:', e);
+            return;
+          }
+        } else {
+          parsedData = rawData;
+        }
+        setMetrics(parsedData);
       });
       
       setSocket(newSocket);
@@ -136,11 +139,21 @@ export function useSocket() {
         return;
       }
       
-      socket.emit('execute_command', command, (response: SocketResponse<CommandResult>) => {
-        if (response.success) {
-          resolve(response.result || { output: 'Command executed successfully' });
-        } else {
-          reject(new Error(response.error || 'Unknown error'));
+      socket.emit('execute_command', command, (response: string | SocketResponse<CommandResult>) => {
+        try {
+          // Handle string response
+          if (typeof response === 'string') {
+            return resolve({ output: response });
+          }
+          
+          // Handle object response
+          if (response.success) {
+            resolve(response.result || { output: 'Command executed successfully' });
+          } else {
+            reject(new Error(response.error || 'Unknown error'));
+          }
+        } catch (err) {
+          reject(new Error('Failed to parse server response'));
         }
       });
     });
