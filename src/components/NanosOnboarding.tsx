@@ -1,6 +1,6 @@
 'use client';
 
-import { useState, useEffect } from 'react';
+import { useState, useEffect, useCallback } from 'react';
 import { useUser } from '@/hooks/useUser';
 import { useSocket } from '@/hooks/useSocket';
 
@@ -20,6 +20,43 @@ const NANOS_VERSIONS = [
   }
 ];
 
+// Installation directory that will be used across the app
+export const NANOS_INSTALL_DIR = '/opt/nanos-world-server';
+
+// Default server configuration
+const DEFAULT_SERVER_CONFIG = `[discover]
+name = "nanos world server"
+description = ""
+ip = "0.0.0.0"
+port = 7777
+query_port = 7778
+announce = true
+dedicated_server = true
+
+[general]
+max_players = 64
+password = ""
+token = ""
+banned_ids = [ ]
+
+[game]
+map = "default-blank-map"
+game_mode = ""
+packages = [ "", ]
+assets = [ ]
+loading_screen = ""
+
+[custom_settings]
+
+[debug]
+log_level = 1
+async_log = true
+profiling = false
+
+[optimization]
+tick_rate = 33
+compression = 0`;
+
 // Onboarding steps
 enum OnboardingStep {
   WELCOME = 0,
@@ -27,6 +64,19 @@ enum OnboardingStep {
   INSTALLATION = 2,
   CONFIGURATION = 3,
   COMPLETE = 4
+}
+
+// Server configuration interface
+interface ServerConfig {
+  serverName: string;
+  description: string;
+  maxPlayers: number;
+  password: string;
+  logLevel: number;
+  asyncLog: boolean;
+  profiling: boolean;
+  tickRate: number;
+  compression: number;
 }
 
 export default function NanosOnboarding() {
@@ -37,11 +87,16 @@ export default function NanosOnboarding() {
   const [installationProgress, setInstallationProgress] = useState<number>(0);
   const [installationLog, setInstallationLog] = useState<string[]>([]);
   const [isInstalling, setIsInstalling] = useState<boolean>(false);
-  const [serverConfig, setServerConfig] = useState({
-    serverName: 'My Nanos Server',
-    maxPlayers: 32,
-    port: 7777,
-    queryPort: 7778
+  const [serverConfig, setServerConfig] = useState<ServerConfig>({
+    serverName: "My Nanos Server",
+    description: "",
+    maxPlayers: 64,
+    password: "",
+    logLevel: 1,
+    asyncLog: true,
+    profiling: false,
+    tickRate: 33,
+    compression: 0
   });
   
   // Function to handle next step
@@ -83,15 +138,14 @@ export default function NanosOnboarding() {
 
       setInstallationProgress(30);
       addLogMessage('> Creating installation directory...');
-      const installDir = '/opt/nanos-world-server';
-      const createDir = await executeCommand(`sudo mkdir -p ${installDir}/steam`);
+      const createDir = await executeCommand(`sudo mkdir -p ${NANOS_INSTALL_DIR}/steam`);
       if (createDir.error) {
         addLogMessage(`Error: ${createDir.error}`);
         throw new Error(createDir.error);
       }
       addLogMessage(createDir.output);
 
-      const setPerms = await executeCommand(`sudo chown -R $USER:$USER ${installDir}`);
+      const setPerms = await executeCommand(`sudo chown -R $USER:$USER ${NANOS_INSTALL_DIR}`);
       if (setPerms.error) {
         addLogMessage(`Error: ${setPerms.error}`);
         throw new Error(setPerms.error);
@@ -100,7 +154,7 @@ export default function NanosOnboarding() {
 
       setInstallationProgress(50);
       addLogMessage('> Changing to installation directory...');
-      const cdCommand = await executeCommand(`cd ${installDir}/steam`);
+      const cdCommand = await executeCommand(`cd ${NANOS_INSTALL_DIR}/steam`);
       if (cdCommand.error) {
         addLogMessage(`Error: ${cdCommand.error}`);
         throw new Error(cdCommand.error);
@@ -116,16 +170,32 @@ export default function NanosOnboarding() {
 
       setInstallationProgress(70);
       addLogMessage('> Starting SteamCMD download (this may take a while)...');
-      const installServer = await executeCommand(`./steamcmd.sh +force_install_dir ${installDir} +login anonymous +app_update 1936830 validate +quit`);
+      
+      // Determine the install command based on selected version
+      const steamInstallCmd = selectedVersion === 'bleeding-edge' 
+        ? `./steamcmd.sh +force_install_dir ${NANOS_INSTALL_DIR} +login anonymous "+app_update 1936830 -beta bleeding-edge" validate +quit`
+        : `./steamcmd.sh +force_install_dir ${NANOS_INSTALL_DIR} +login anonymous +app_update 1936830 validate +quit`;
+      
+      const installServer = await executeCommand(steamInstallCmd);
       if (installServer.error) {
         addLogMessage(`Error during server installation: ${installServer.error}`);
         throw new Error(installServer.error);
       }
       addLogMessage(installServer.output);
 
+      setInstallationProgress(85);
+      addLogMessage('> Creating default configuration file...');
+      // Create Config.toml with default configuration
+      const createConfig = await executeCommand(`echo '${DEFAULT_SERVER_CONFIG}' > ${NANOS_INSTALL_DIR}/Config.toml`);
+      if (createConfig.error) {
+        addLogMessage(`Error creating configuration file: ${createConfig.error}`);
+        throw new Error(createConfig.error);
+      }
+      addLogMessage('> Configuration file created successfully');
+
       setInstallationProgress(90);
       addLogMessage('> Setting up permissions...');
-      const makeExecutable = await executeCommand(`chmod +x ${installDir}/NanosWorldServer.sh`);
+      const makeExecutable = await executeCommand(`chmod +x ${NANOS_INSTALL_DIR}/NanosWorldServer.sh`);
       if (makeExecutable.error) {
         addLogMessage(`Error: ${makeExecutable.error}`);
         throw new Error(makeExecutable.error);
@@ -134,7 +204,7 @@ export default function NanosOnboarding() {
 
       setInstallationProgress(100);
       addLogMessage('> Installation complete!');
-      addLogMessage(`> Server installed at: ${installDir}`);
+      addLogMessage(`> Server installed at: ${NANOS_INSTALL_DIR}`);
       addLogMessage('> You can now proceed with server configuration.');
       
     } catch (error) {
@@ -146,20 +216,116 @@ export default function NanosOnboarding() {
   };
   
   // Function to add log message
-  const addLogMessage = (message: string) => {
+  const addLogMessage = useCallback((message: string) => {
     setInstallationLog(prev => [...prev, message]);
-  };
+  }, []);
   
   // Function to handle configuration changes
-  const handleConfigChange = (e: React.ChangeEvent<HTMLInputElement>) => {
-    const { name, value } = e.target;
+  const handleConfigChange = async (e: React.ChangeEvent<HTMLInputElement | HTMLSelectElement | HTMLTextAreaElement>) => {
+    const { name, value, type } = e.target;
+    let processedValue: string | number | boolean = value;
+
+    // Process value based on input type
+    if (type === 'number') {
+      processedValue = Number.parseInt(value, 10) || 0;
+    } else if (type === 'checkbox') {
+      processedValue = (e.target as HTMLInputElement).checked;
+    }
+
+    // Update the state
     setServerConfig(prev => ({
       ...prev,
-      [name]: name === 'maxPlayers' || name === 'port' || name === 'queryPort' 
-        ? parseInt(value, 10) || 0 
-        : value
+      [name]: processedValue
     }));
+
+    // Read current config
+    const readConfig = await executeCommand(`cat ${NANOS_INSTALL_DIR}/Config.toml`);
+    if (readConfig.error) {
+      addLogMessage(`Error reading config: ${readConfig.error}`);
+      return;
+    }
+
+    let configContent = readConfig.output;
+
+    // Update the appropriate section based on the field
+    switch (name) {
+      case 'serverName':
+        configContent = configContent.replace(/name = ".*"/g, `name = "${value}"`);
+        break;
+      case 'description':
+        configContent = configContent.replace(/description = ".*"/g, `description = "${value}"`);
+        break;
+      case 'maxPlayers':
+        configContent = configContent.replace(/max_players = \d+/g, `max_players = ${processedValue}`);
+        break;
+      case 'password':
+        configContent = configContent.replace(/password = ".*"/g, `password = "${value}"`);
+        break;
+      case 'logLevel':
+        configContent = configContent.replace(/log_level = \d+/g, `log_level = ${processedValue}`);
+        break;
+      case 'asyncLog':
+        configContent = configContent.replace(/async_log = \w+/g, `async_log = ${processedValue}`);
+        break;
+      case 'profiling':
+        configContent = configContent.replace(/profiling = \w+/g, `profiling = ${processedValue}`);
+        break;
+      case 'tickRate':
+        configContent = configContent.replace(/tick_rate = \d+/g, `tick_rate = ${processedValue}`);
+        break;
+      case 'compression':
+        configContent = configContent.replace(/compression = \d+/g, `compression = ${processedValue}`);
+        break;
+    }
+
+    // Write updated config back to file
+    const writeConfig = await executeCommand(`echo '${configContent}' > ${NANOS_INSTALL_DIR}/Config.toml`);
+    if (writeConfig.error) {
+      addLogMessage(`Error updating config: ${writeConfig.error}`);
+    }
   };
+  
+  // Function to load initial config values
+  const loadConfigValues = useCallback(async () => {
+    const readConfig = await executeCommand(`cat ${NANOS_INSTALL_DIR}/Config.toml`);
+    if (readConfig.error) {
+      addLogMessage(`Error reading config: ${readConfig.error}`);
+      return;
+    }
+
+    const config = readConfig.output;
+    
+    // Extract values using regex
+    const serverName = config.match(/name = "(.*?)"/)?.[1] || "My Nanos Server";
+    const description = config.match(/description = "(.*?)"/)?.[1] || "";
+    const maxPlayers = Number.parseInt(config.match(/max_players = (\d+)/)?.[1] || "64", 10);
+    const password = config.match(/password = "(.*?)"/)?.[1] || "";
+    const logLevel = Number.parseInt(config.match(/log_level = (\d+)/)?.[1] || "1", 10);
+    const asyncLog = config.match(/async_log = (\w+)/)?.[1] === 'true';
+    const profiling = config.match(/profiling = (\w+)/)?.[1] === 'true';
+    const tickRate = Number.parseInt(config.match(/tick_rate = (\d+)/)?.[1] || "33", 10);
+    const compression = Number.parseInt(config.match(/compression = (\d+)/)?.[1] || "0", 10);
+
+    // Update state with values from config file
+    setServerConfig({
+      serverName,
+      description,
+      maxPlayers,
+      password,
+      logLevel,
+      asyncLog,
+      profiling,
+      tickRate,
+      compression
+    });
+  }, [executeCommand, addLogMessage]);
+
+  // Load config values when reaching configuration step
+  useEffect(() => {
+    if (currentStep === OnboardingStep.CONFIGURATION) {
+      loadConfigValues();
+    }
+  }, [currentStep, loadConfigValues]);
   
   // Function to complete onboarding
   const handleCompleteOnboarding = async () => {
@@ -167,6 +333,197 @@ export default function NanosOnboarding() {
     // Navigate to dashboard or reload page
     window.location.reload();
   };
+  
+  // Configuration step UI
+  const renderConfigurationStep = () => (
+    <div className="space-y-6">
+      <h3 className="text-xl font-semibold text-amber-300 font-mono">Server Configuration</h3>
+      
+      <div className="grid grid-cols-1 gap-6">
+        <div className="space-y-2">
+          <label htmlFor="serverName" className="block text-gray-300 font-mono text-sm group relative">
+            Server Name
+            <span className="opacity-0 group-hover:opacity-100 absolute left-full ml-2 px-2 py-1 bg-black/80 text-xs rounded whitespace-nowrap">
+              The name of your server as displayed in the server list
+            </span>
+          </label>
+          <input
+            id="serverName"
+            type="text"
+            name="serverName"
+            value={serverConfig.serverName}
+            onChange={handleConfigChange}
+            className="w-full bg-black/30 border border-amber-500/20 rounded p-2 text-gray-200 font-mono focus:outline-none focus:border-amber-500/50"
+          />
+        </div>
+
+        <div className="space-y-2">
+          <label htmlFor="description" className="block text-gray-300 font-mono text-sm group relative">
+            Description
+            <span className="opacity-0 group-hover:opacity-100 absolute left-full ml-2 px-2 py-1 bg-black/80 text-xs rounded whitespace-nowrap">
+              Server description (max 127 characters)
+            </span>
+          </label>
+          <textarea
+            id="description"
+            name="description"
+            value={serverConfig.description}
+            onChange={handleConfigChange}
+            maxLength={127}
+            rows={2}
+            className="w-full bg-black/30 border border-amber-500/20 rounded p-2 text-gray-200 font-mono focus:outline-none focus:border-amber-500/50"
+          />
+        </div>
+
+        <div className="space-y-2">
+          <label htmlFor="maxPlayers" className="block text-gray-300 font-mono text-sm group relative">
+            Max Players
+            <span className="opacity-0 group-hover:opacity-100 absolute left-full ml-2 px-2 py-1 bg-black/80 text-xs rounded whitespace-nowrap">
+              Maximum number of players that can join the server
+            </span>
+          </label>
+          <input
+            id="maxPlayers"
+            type="number"
+            name="maxPlayers"
+            value={serverConfig.maxPlayers}
+            onChange={handleConfigChange}
+            min="1"
+            max="128"
+            className="w-full bg-black/30 border border-amber-500/20 rounded p-2 text-gray-200 font-mono focus:outline-none focus:border-amber-500/50"
+          />
+        </div>
+
+        <div className="space-y-2">
+          <label htmlFor="password" className="block text-gray-300 font-mono text-sm group relative">
+            Password
+            <span className="opacity-0 group-hover:opacity-100 absolute left-full ml-2 px-2 py-1 bg-black/80 text-xs rounded whitespace-nowrap">
+              Leave blank for no password
+            </span>
+          </label>
+          <input
+            id="password"
+            type="password"
+            name="password"
+            value={serverConfig.password}
+            onChange={handleConfigChange}
+            className="w-full bg-black/30 border border-amber-500/20 rounded p-2 text-gray-200 font-mono focus:outline-none focus:border-amber-500/50"
+          />
+        </div>
+
+        <div className="space-y-2">
+          <label htmlFor="logLevel" className="block text-gray-300 font-mono text-sm group relative">
+            Log Level
+            <span className="opacity-0 group-hover:opacity-100 absolute left-full ml-2 px-2 py-1 bg-black/80 text-xs rounded whitespace-nowrap">
+              (1) normal, (2) debug or (3) verbose
+            </span>
+          </label>
+          <select
+            id="logLevel"
+            name="logLevel"
+            value={serverConfig.logLevel}
+            onChange={handleConfigChange}
+            className="w-full bg-black/30 border border-amber-500/20 rounded p-2 text-gray-200 font-mono focus:outline-none focus:border-amber-500/50"
+          >
+            <option value={1}>Normal</option>
+            <option value={2}>Debug</option>
+            <option value={3}>Verbose</option>
+          </select>
+        </div>
+
+        <div className="space-y-4">
+          <div className="flex items-center space-x-3">
+            <input
+              id="asyncLog"
+              type="checkbox"
+              name="asyncLog"
+              checked={serverConfig.asyncLog}
+              onChange={handleConfigChange}
+              className="w-4 h-4 bg-black/30 border border-amber-500/20 rounded focus:ring-amber-500"
+            />
+            <label htmlFor="asyncLog" className="text-gray-300 font-mono text-sm group relative">
+              Async Log
+              <span className="opacity-0 group-hover:opacity-100 absolute left-full ml-2 px-2 py-1 bg-black/80 text-xs rounded whitespace-nowrap">
+                Async provides better performance, disable for debugging crashes
+              </span>
+            </label>
+          </div>
+
+          <div className="flex items-center space-x-3">
+            <input
+              id="profiling"
+              type="checkbox"
+              name="profiling"
+              checked={serverConfig.profiling}
+              onChange={handleConfigChange}
+              className="w-4 h-4 bg-black/30 border border-amber-500/20 rounded focus:ring-amber-500"
+            />
+            <label htmlFor="profiling" className="text-gray-300 font-mono text-sm group relative">
+              Profiling
+              <span className="opacity-0 group-hover:opacity-100 absolute left-full ml-2 px-2 py-1 bg-black/80 text-xs rounded whitespace-nowrap">
+                Enable performance profiling logs for debugging
+              </span>
+            </label>
+          </div>
+        </div>
+
+        <div className="space-y-2">
+          <label htmlFor="tickRate" className="block text-gray-300 font-mono text-sm group relative">
+            Tick Rate
+            <span className="opacity-0 group-hover:opacity-100 absolute left-full ml-2 px-2 py-1 bg-black/80 text-xs rounded whitespace-nowrap">
+              Server tick rate in milliseconds (33ms = 30 ticks per second, recommended)
+            </span>
+          </label>
+          <input
+            id="tickRate"
+            type="number"
+            name="tickRate"
+            value={serverConfig.tickRate}
+            onChange={handleConfigChange}
+            min="16"
+            max="100"
+            className="w-full bg-black/30 border border-amber-500/20 rounded p-2 text-gray-200 font-mono focus:outline-none focus:border-amber-500/50"
+          />
+        </div>
+
+        <div className="space-y-2">
+          <label htmlFor="compression" className="block text-gray-300 font-mono text-sm group relative">
+            Compression Level
+            <span className="opacity-0 group-hover:opacity-100 absolute left-full ml-2 px-2 py-1 bg-black/80 text-xs rounded whitespace-nowrap">
+              (0) disabled, (1) fastest, (9) highest compression
+            </span>
+          </label>
+          <input
+            id="compression"
+            type="number"
+            name="compression"
+            value={serverConfig.compression}
+            onChange={handleConfigChange}
+            min="0"
+            max="9"
+            className="w-full bg-black/30 border border-amber-500/20 rounded p-2 text-gray-200 font-mono focus:outline-none focus:border-amber-500/50"
+          />
+        </div>
+      </div>
+
+      <div className="flex justify-between mt-6">
+        <button
+          type="button"
+          onClick={handlePrevStep}
+          className="px-4 py-2 bg-gray-800/50 text-gray-300 rounded hover:bg-gray-800/70 transition-colors font-mono"
+        >
+          &lt; Back
+        </button>
+        <button
+          type="button"
+          onClick={handleNextStep}
+          className="px-4 py-2 bg-amber-500/30 text-amber-300 rounded hover:bg-amber-500/40 transition-colors font-mono"
+        >
+          Next Step &gt;
+        </button>
+      </div>
+    </div>
+  );
   
   // Render the current step
   const renderStep = () => {
@@ -295,95 +652,7 @@ export default function NanosOnboarding() {
         );
         
       case OnboardingStep.CONFIGURATION:
-        return (
-          <div className="space-y-4">
-            <h3 className="text-xl font-semibold text-amber-300 font-mono">Configure Your Server</h3>
-            <p className="text-gray-300 mb-4">
-              Set up the basic configuration for your Nanos World Server:
-            </p>
-            
-            <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
-              <div className="space-y-2">
-                <label className="block text-gray-300 font-mono text-sm">Server Name</label>
-                <input
-                  type="text"
-                  name="serverName"
-                  value={serverConfig.serverName}
-                  onChange={handleConfigChange}
-                  className="w-full bg-black/30 border border-amber-500/20 rounded p-2 text-gray-200 font-mono focus:outline-none focus:border-amber-500/50"
-                />
-              </div>
-              
-              <div className="space-y-2">
-                <label className="block text-gray-300 font-mono text-sm">Max Players</label>
-                <input
-                  type="number"
-                  name="maxPlayers"
-                  value={serverConfig.maxPlayers}
-                  onChange={handleConfigChange}
-                  min="1"
-                  max="100"
-                  className="w-full bg-black/30 border border-amber-500/20 rounded p-2 text-gray-200 font-mono focus:outline-none focus:border-amber-500/50"
-                />
-              </div>
-              
-              <div className="space-y-2">
-                <label className="block text-gray-300 font-mono text-sm">Game Port</label>
-                <input
-                  type="number"
-                  name="port"
-                  value={serverConfig.port}
-                  onChange={handleConfigChange}
-                  min="1024"
-                  max="65535"
-                  className="w-full bg-black/30 border border-amber-500/20 rounded p-2 text-gray-200 font-mono focus:outline-none focus:border-amber-500/50"
-                />
-              </div>
-              
-              <div className="space-y-2">
-                <label className="block text-gray-300 font-mono text-sm">Query Port</label>
-                <input
-                  type="number"
-                  name="queryPort"
-                  value={serverConfig.queryPort}
-                  onChange={handleConfigChange}
-                  min="1024"
-                  max="65535"
-                  className="w-full bg-black/30 border border-amber-500/20 rounded p-2 text-gray-200 font-mono focus:outline-none focus:border-amber-500/50"
-                />
-              </div>
-            </div>
-            
-            <div className="mt-4 p-3 bg-black/20 rounded border border-amber-500/10">
-              <h4 className="text-sm font-mono text-amber-300 mb-2">Server Configuration Preview:</h4>
-              <pre className="text-xs text-gray-300 font-mono overflow-x-auto">
-{`{
-  "server_name": "${serverConfig.serverName}",
-  "max_players": ${serverConfig.maxPlayers},
-  "port": ${serverConfig.port},
-  "query_port": ${serverConfig.queryPort},
-  "log_level": "info",
-  "packages": ["sandbox"]
-}`}
-              </pre>
-            </div>
-            
-            <div className="flex justify-between mt-6">
-              <button
-                onClick={handlePrevStep}
-                className="px-4 py-2 bg-gray-800/50 text-gray-300 rounded hover:bg-gray-800/70 transition-colors font-mono"
-              >
-                &lt; Back
-              </button>
-              <button
-                onClick={handleNextStep}
-                className="px-4 py-2 bg-amber-500/30 text-amber-300 rounded hover:bg-amber-500/40 transition-colors font-mono"
-              >
-                Next Step &gt;
-              </button>
-            </div>
-          </div>
-        );
+        return renderConfigurationStep();
         
       case OnboardingStep.COMPLETE:
         return (
