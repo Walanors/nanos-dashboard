@@ -18,6 +18,42 @@ interface OnboardingStatus {
   onboarding_completed: number;
 }
 
+// Define server config interface
+interface ServerConfig {
+  discover: {
+    name: string;
+    description: string;
+    ip: string;
+    port: number;
+    query_port: number;
+    announce: boolean;
+    dedicated_server: boolean;
+  };
+  general: {
+    max_players: number;
+    password: string;
+    token: string;
+    banned_ids: string[];
+  };
+  game: {
+    map: string;
+    game_mode: string;
+    packages: string[];
+    assets: string[];
+    loading_screen: string;
+  };
+  custom_settings: Record<string, unknown>;
+  debug: {
+    log_level: number;
+    async_log: boolean;
+    profiling: boolean;
+  };
+  optimization: {
+    tick_rate: number;
+    compression: number;
+  };
+}
+
 // Ensure the data directory exists
 const dataDir = path.dirname(DB_PATH);
 if (!fs.existsSync(dataDir)) {
@@ -51,6 +87,16 @@ function initializeDatabase() {
       last_login TIMESTAMP,
       updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
       FOREIGN KEY (user_id) REFERENCES users(id) ON DELETE CASCADE
+    )
+  `);
+
+  // Create server_config table
+  db.exec(`
+    CREATE TABLE IF NOT EXISTS server_config (
+      id INTEGER PRIMARY KEY CHECK (id = 1), -- Ensures only one configuration
+      config_json TEXT NOT NULL,
+      created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+      updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
     )
   `);
 
@@ -120,6 +166,77 @@ export function updateLastLogin(username: string): boolean {
   
   const result = stmt.run(user.id);
   return result.changes > 0;
+}
+
+// Server config functions
+export function getServerConfig(): ServerConfig | null {
+  const stmt = db.prepare('SELECT config_json FROM server_config WHERE id = 1');
+  const result = stmt.get();
+  
+  if (!result) {
+    return null;
+  }
+  
+  return JSON.parse(result.config_json) as ServerConfig;
+}
+
+export function saveServerConfig(config: ServerConfig): boolean {
+  const stmt = db.prepare(`
+    INSERT OR REPLACE INTO server_config (id, config_json, updated_at)
+    VALUES (1, ?, CURRENT_TIMESTAMP)
+  `);
+  
+  try {
+    const result = stmt.run(JSON.stringify(config));
+    return result.changes > 0;
+  } catch (error) {
+    console.error('Error saving server config:', error);
+    return false;
+  }
+}
+
+export function initializeDefaultConfig(): boolean {
+  // Only initialize if no config exists
+  if (getServerConfig()) {
+    return false;
+  }
+
+  const defaultConfig: ServerConfig = {
+    discover: {
+      name: "a great server",
+      description: "nanos made easy",
+      ip: "0.0.0.0",
+      port: 7777,
+      query_port: 7778,
+      announce: true,
+      dedicated_server: true
+    },
+    general: {
+      max_players: 64,
+      password: "",
+      token: "",
+      banned_ids: []
+    },
+    game: {
+      map: "default-blank-map",
+      game_mode: "",
+      packages: [],
+      assets: [],
+      loading_screen: ""
+    },
+    custom_settings: {},
+    debug: {
+      log_level: 1,
+      async_log: true,
+      profiling: false
+    },
+    optimization: {
+      tick_rate: 33,
+      compression: 0
+    }
+  };
+
+  return saveServerConfig(defaultConfig);
 }
 
 // Export the database instance for advanced usage
