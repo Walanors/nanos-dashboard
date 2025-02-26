@@ -57,19 +57,19 @@ export default function DashboardLayout({
     setIsUpdating(true);
     try {
       // Execute git pull to update the codebase
-      const result = await executeCommand('git pull');
+      const result = await executeCommand('sudo git pull');
       if (result.error) {
         throw new Error(result.error);
       }
 
-      // Install all dependencies including dev dependencies
-      const installPackages = await executeCommand('npm install --include=dev');
+      // Install all dependencies including dev dependencies with sudo
+      const installPackages = await executeCommand('sudo npm install --include=dev');
       if (installPackages.error) {
         throw new Error(installPackages.error);
       }
       
-      // Rebuild the application after update
-      const buildResult = await executeCommand('npm run build');
+      // Rebuild the application after update with sudo
+      const buildResult = await executeCommand('sudo npm run build');
       if (buildResult.error) {
         throw new Error(buildResult.error);
       }
