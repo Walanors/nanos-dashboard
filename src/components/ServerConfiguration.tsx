@@ -54,30 +54,44 @@ export default function ServerConfiguration() {
     setIsLoading(true);
     setError(null);
     try {
+      // First check if we can connect to the socket
+      const testConnection = await executeCommand('echo "test connection"');
+      if (testConnection.error) {
+        throw new Error('Socket not connected. Please ensure the service is running.');
+      }
+
       const result = await executeCommand(`cat ${NANOS_INSTALL_DIR}/Config.toml`);
       if (result.error) {
         throw new Error(result.error);
       }
-      
-      // Clean the output by removing the "Command executed successfully" line
-      const configContent = result.output.split('\n').slice(1).join('\n');
-      
-      // Log the raw config content for debugging
+
+      // Get the raw output
+      const rawOutput = result.output;
+      console.log('Raw command output:', rawOutput);
+
+      // Clean the output by removing any potential shell prompts or command success messages
+      const configLines = rawOutput.split('\n');
+      const cleanedLines = configLines.filter(line => 
+        !line.includes('Command executed successfully') &&
+        !line.match(/^root@.*#/) && // Remove root shell prompts
+        line.trim() !== '' // Remove empty lines
+      );
+      const configContent = cleanedLines.join('\n');
+
+      // Log the cleaned config content for debugging
+      console.log('Cleaned config content:', configContent);
       toast.success('Raw config content loaded');
-      console.log('Raw config content:', configContent);
-      
+
       try {
         // Parse TOML content
         const parsedConfig = TOML.parse(configContent) as unknown as ServerConfig;
         console.log('Parsed config:', parsedConfig);
-        
-        // Log the parsed config for debugging
         toast.success('TOML parsed successfully');
-        
+
         // Validate required fields
         const validationResult = validateConfig(parsedConfig);
         console.log('Validation result:', validationResult);
-        
+
         if (!validationResult) {
           // Log the missing or invalid fields
           const conf = parsedConfig as ServerConfig;
@@ -87,11 +101,11 @@ export default function ServerConfiguration() {
           console.log('game section:', conf.game);
           console.log('debug section:', conf.debug);
           console.log('optimization section:', conf.optimization);
-          
+
           toast.error('Config validation failed');
           throw new Error('Invalid configuration file format');
         }
-        
+
         toast.success('Config validation passed');
         setConfig(parsedConfig);
       } catch (parseError) {
@@ -103,6 +117,7 @@ export default function ServerConfiguration() {
       const errorMessage = (err as Error).message;
       setError(errorMessage);
       toast.error(`Failed to load configuration: ${errorMessage}`);
+      console.error('Load config error:', err);
     } finally {
       setIsLoading(false);
     }
