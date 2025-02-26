@@ -51,17 +51,21 @@ async function checkForUpdates(): Promise<{
   try {
     // Get current version from local file
     const currentVer = await getCurrentVersion();
-    const localContent = await fs.readFile(LOCAL_UPDATE_FILE, 'utf-8');
-    const localManifest: UpdateManifest = JSON.parse(localContent);
     
-    // Compare version numbers
-    const updateAvailable = localManifest.latest_version !== currentVer;
+    // Fetch remote update.json from GitHub
+    const response = await fetch('https://raw.githubusercontent.com/Walanors/nanos-dashboard/main/update.json');
+    if (!response.ok) {
+      throw new Error('Failed to fetch remote update.json');
+    }
+    
+    const remoteManifest: UpdateManifest = await response.json();
+    const updateAvailable = remoteManifest.latest_version !== currentVer;
 
     return {
       current: currentVer,
-      latest: localManifest.latest_version,
+      latest: remoteManifest.latest_version,
       updateAvailable,
-      updateInfo: updateAvailable ? localManifest : null
+      updateInfo: updateAvailable ? remoteManifest : null
     };
   } catch (error) {
     console.error('Error checking for updates:', error);
