@@ -11,9 +11,8 @@ import fetch from 'node-fetch';
 const execPromise = util.promisify(exec);
 
 // Constants for version checking
-const CURRENT_VERSION = '1.0.0';
 const UPDATE_CHECK_INTERVAL = 30000; // 30 seconds
-const UPDATE_MANIFEST_URL = 'https://raw.githubusercontent.com/Walanors/nanos-dashboard/main/update.json';
+const LOCAL_UPDATE_FILE = path.join(process.cwd(), 'update.json');
 
 // Interface for update info from manifest
 interface UpdateManifest {
@@ -25,6 +24,22 @@ interface UpdateManifest {
 
 // Track update check interval
 let updateCheckInterval: NodeJS.Timeout | null = null;
+let currentVersion: string | null = null;
+
+// Function to read current version from local update.json
+async function getCurrentVersion(): Promise<string> {
+  if (currentVersion) return currentVersion;
+  
+  try {
+    const content = await fs.readFile(LOCAL_UPDATE_FILE, 'utf-8');
+    const localManifest: UpdateManifest = JSON.parse(content);
+    currentVersion = localManifest.latest_version;
+    return currentVersion;
+  } catch (error) {
+    console.error('Error reading current version:', error);
+    return '0.0.0'; // Fallback version if file cannot be read
+  }
+}
 
 // Function to check for updates
 async function checkForUpdates(): Promise<{
@@ -34,24 +49,29 @@ async function checkForUpdates(): Promise<{
   updateInfo: UpdateManifest | null;
 }> {
   try {
-    const response = await fetch(UPDATE_MANIFEST_URL);
-    if (!response.ok) {
-      throw new Error('Failed to fetch update manifest');
-    }
-
-    const manifest: UpdateManifest = await response.json();
-    const updateAvailable = manifest.latest_version !== CURRENT_VERSION;
+    // Get current version from local file
+    const currentVer = await getCurrentVersion();
+    
+    // Execute git fetch to get latest refs
+    await execPromise('git fetch');
+    
+    // Try to read update.json from origin/main
+    const { stdout: remoteContent } = await execPromise('git show origin/main:update.json');
+    const remoteManifest: UpdateManifest = JSON.parse(remoteContent);
+    
+    const updateAvailable = remoteManifest.latest_version !== currentVer;
 
     return {
-      current: CURRENT_VERSION,
-      latest: manifest.latest_version,
+      current: currentVer,
+      latest: remoteManifest.latest_version,
       updateAvailable,
-      updateInfo: updateAvailable ? manifest : null
+      updateInfo: updateAvailable ? remoteManifest : null
     };
   } catch (error) {
     console.error('Error checking for updates:', error);
+    const currentVer = await getCurrentVersion();
     return {
-      current: CURRENT_VERSION,
+      current: currentVer,
       latest: null,
       updateAvailable: false,
       updateInfo: null
