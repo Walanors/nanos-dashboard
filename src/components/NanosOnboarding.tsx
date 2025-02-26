@@ -73,105 +73,18 @@ export default function NanosOnboarding() {
     
     try {
       setInstallationProgress(10);
-      addLogMessage('> Adding multiverse repository...');
-      const addRepo = await executeCommand('sudo add-apt-repository multiverse -y');
-      if (addRepo.error) {
-        addLogMessage(`Error: ${addRepo.error}`);
-        throw new Error(addRepo.error);
+      addLogMessage('> Installing lib32gcc-s1...');
+      const installLib32 = await executeCommand('sudo apt-get install -y lib32gcc-s1');
+      if (installLib32.error) {
+        addLogMessage(`Error: ${installLib32.error}`);
+        throw new Error(installLib32.error);
       }
-      addLogMessage(addRepo.output);
-
-      setInstallationProgress(20);
-      addLogMessage('> Adding i386 architecture...');
-      const addArch = await executeCommand('sudo dpkg --add-architecture i386');
-      if (addArch.error) {
-        addLogMessage(`Error: ${addArch.error}`);
-        throw new Error(addArch.error);
-      }
-      addLogMessage(addArch.output);
+      addLogMessage(installLib32.output);
 
       setInstallationProgress(30);
-      addLogMessage('> Updating package lists...');
-      const aptUpdate = await executeCommand('sudo apt update');
-      if (aptUpdate.error) {
-        addLogMessage(`Error: ${aptUpdate.error}`);
-        throw new Error(aptUpdate.error);
-      }
-      addLogMessage(aptUpdate.output);
-
-      setInstallationProgress(40);
-      addLogMessage('> Installing required dependencies...');
-      
-      // Clean up any stuck processes and locked files
-      addLogMessage('> Checking for locked package manager...');
-      await executeCommand('sudo killall apt apt-get dpkg 2>/dev/null || true');
-      await executeCommand('sudo rm -f /var/lib/dpkg/lock* /var/lib/apt/lists/lock* /var/cache/apt/archives/lock* /var/cache/debconf/*.dat.lock 2>/dev/null || true');
-      
-      // Fix interrupted dpkg state
-      addLogMessage('> Fixing package manager state...');
-      const fixDpkg = await executeCommand('sudo dpkg --configure -a');
-      if (fixDpkg.error) {
-        addLogMessage(`Warning: Could not fix dpkg state: ${fixDpkg.error}`);
-        // Continue anyway as this might not be fatal
-      } else {
-        addLogMessage('> Package manager state fixed');
-      }
-      
-      // Wait a moment for processes to clean up
-      await new Promise(resolve => setTimeout(resolve, 2000));
-      
-      // Pre-accept Steam license agreement using separate commands
-      addLogMessage('> Pre-accepting Steam license agreement...');
-      
-      // Create a temporary script for license acceptance with error handling
-      const licenseScript = `#!/bin/bash
-set -e
-# Clean up any existing locks
-rm -f /var/cache/debconf/*.dat.lock 2>/dev/null || true
-# Set up Steam license
-echo steam steam/license note '' | debconf-set-selections
-echo steam steam/question select "I AGREE" | debconf-set-selections`;
-      
-      const createLicenseScript = await executeCommand(`cat << 'EOF' > /tmp/accept_steam_license.sh\n${licenseScript}\nEOF`);
-      if (createLicenseScript.error) {
-        addLogMessage(`Error creating license script: ${createLicenseScript.error}`);
-        throw new Error(createLicenseScript.error);
-      }
-      
-      const chmodLicenseScript = await executeCommand('chmod +x /tmp/accept_steam_license.sh');
-      if (chmodLicenseScript.error) {
-        addLogMessage(`Error setting license script permissions: ${chmodLicenseScript.error}`);
-        throw new Error(chmodLicenseScript.error);
-      }
-      
-      const setLicense = await executeCommand('sudo /tmp/accept_steam_license.sh');
-      if (setLicense.error) {
-        addLogMessage(`Error accepting Steam license: ${setLicense.error}`);
-        throw new Error(setLicense.error);
-      }
-      addLogMessage(setLicense.output || '> Steam license accepted');
-
-      // Run apt update again to ensure we have a clean state
-      addLogMessage('> Updating package lists again...');
-      const aptUpdateRetry = await executeCommand('sudo apt update');
-      if (aptUpdateRetry.error) {
-        addLogMessage(`Warning: Package list update failed: ${aptUpdateRetry.error}`);
-        // Continue anyway as this might not be fatal
-      }
-
-      // Using expect-like syntax to handle interactive prompts
-      addLogMessage('> Installing SteamCMD and dependencies...');
-      const installDeps = await executeCommand('DEBIAN_FRONTEND=noninteractive sudo -E apt install -y lib32gcc-s1 steamcmd');
-      if (installDeps.error) {
-        addLogMessage(`Error: ${installDeps.error}`);
-        throw new Error(installDeps.error);
-      }
-      addLogMessage(installDeps.output);
-
-      setInstallationProgress(50);
       addLogMessage('> Creating installation directory...');
       const installDir = '/opt/nanos-world-server';
-      const createDir = await executeCommand(`sudo mkdir -p ${installDir}`);
+      const createDir = await executeCommand(`sudo mkdir -p ${installDir}/steam`);
       if (createDir.error) {
         addLogMessage(`Error: ${createDir.error}`);
         throw new Error(createDir.error);
@@ -184,47 +97,31 @@ echo steam steam/question select "I AGREE" | debconf-set-selections`;
         throw new Error(setPerms.error);
       }
       addLogMessage(setPerms.output);
-      
-      setInstallationProgress(55);
-      addLogMessage('> Downloading SteamCMD...');
-      const downloadSteamCmd = await executeCommand('steamcmd');
-      if (downloadSteamCmd.error) {
-        addLogMessage(`Error: ${downloadSteamCmd.error}`);
-        throw new Error(downloadSteamCmd.error);
-      }
-      addLogMessage(downloadSteamCmd.output);
 
-      setInstallationProgress(60);
-      addLogMessage('> Downloading Nanos World Server...');
-      // Save the script using echo instead of heredoc
-      const createScript = await executeCommand(`steamcmd +force_install_dir ${installDir} +login anonymous +app_update 1936830 validate +quit`);
-      if (createScript.error) {
-        addLogMessage(`Error creating install script: ${createScript.error}`);
-        throw new Error(createScript.error);
+      setInstallationProgress(50);
+      addLogMessage('> Changing to installation directory...');
+      const cdCommand = await executeCommand(`cd ${installDir}/steam`);
+      if (cdCommand.error) {
+        addLogMessage(`Error: ${cdCommand.error}`);
+        throw new Error(cdCommand.error);
       }
 
-      const chmodScript = await executeCommand('chmod +x /tmp/install_nanos.sh');
-      if (chmodScript.error) {
-        addLogMessage(`Error setting script permissions: ${chmodScript.error}`);
-        throw new Error(chmodScript.error);
+      addLogMessage('> Downloading and extracting SteamCMD...');
+      const downloadSteam = await executeCommand('curl -sqL "https://steamcdn-a.akamaihd.net/client/installer/steamcmd_linux.tar.gz" | tar zxvf -');
+      if (downloadSteam.error) {
+        addLogMessage(`Error: ${downloadSteam.error}`);
+        throw new Error(downloadSteam.error);
       }
-      
+      addLogMessage(downloadSteam.output);
+
+      setInstallationProgress(70);
       addLogMessage('> Starting SteamCMD download (this may take a while)...');
-      const installServer = await executeCommand('/tmp/install_nanos.sh');
+      const installServer = await executeCommand(`./steamcmd.sh +force_install_dir ${installDir} +login anonymous +app_update 1936830 validate +quit`);
       if (installServer.error) {
         addLogMessage(`Error during server installation: ${installServer.error}`);
         throw new Error(installServer.error);
       }
       addLogMessage(installServer.output);
-
-      // Monitor the installation progress
-      const checkLogs = await executeCommand('tail -f /tmp/nanos_install_logs/steamcmd_*.log');
-      if (checkLogs.error) {
-        addLogMessage(`Error reading logs: ${checkLogs.error}`);
-      } else {
-        addLogMessage('Latest installation logs:');
-        addLogMessage(checkLogs.output);
-      }
 
       setInstallationProgress(90);
       addLogMessage('> Setting up permissions...');
@@ -234,9 +131,6 @@ echo steam steam/question select "I AGREE" | debconf-set-selections`;
         throw new Error(makeExecutable.error);
       }
       addLogMessage(makeExecutable.output);
-
-      // Cleanup temporary files
-      await executeCommand('rm -f /tmp/steamcmd_script.txt /tmp/install_nanos.sh');
 
       setInstallationProgress(100);
       addLogMessage('> Installation complete!');
