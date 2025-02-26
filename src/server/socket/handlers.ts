@@ -51,6 +51,7 @@ async function checkForUpdates(): Promise<{
   try {
     // Get current version from local file
     const currentVer = await getCurrentVersion();
+    console.log(`[Update Check] Current version: ${currentVer}`);
     
     // Fetch remote update.json from GitHub
     const response = await fetch('https://raw.githubusercontent.com/Walanors/nanos-dashboard/main/update.json');
@@ -59,7 +60,10 @@ async function checkForUpdates(): Promise<{
     }
     
     const remoteManifest: UpdateManifest = await response.json();
+    console.log(`[Update Check] GitHub version: ${remoteManifest.latest_version}`);
+    
     const updateAvailable = remoteManifest.latest_version !== currentVer;
+    console.log(`[Update Check] Update available: ${updateAvailable}`);
 
     return {
       current: currentVer,
