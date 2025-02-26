@@ -62,7 +62,8 @@ export default function DashboardLayout({
         throw new Error(result.error);
       }
 
-      const installPackages = await executeCommand('npm install');
+      // Install all dependencies including dev dependencies
+      const installPackages = await executeCommand('npm install --include=dev');
       if (installPackages.error) {
         throw new Error(installPackages.error);
       }
