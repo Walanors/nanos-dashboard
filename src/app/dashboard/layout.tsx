@@ -52,10 +52,10 @@ export default function DashboardLayout({
         <div className="p-4 border-b border-amber-500/20">
           <div className="flex items-center">
             <div className="text-xl font-bold text-amber-400">
-              NANOS
+              nanos_
             </div>
             <div className="ml-2 text-xs text-amber-400/50 font-mono self-end">
-              DASHBOARD
+              dashboard
             </div>
           </div>
         </div>
