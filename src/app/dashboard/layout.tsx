@@ -55,7 +55,7 @@ export default function DashboardLayout({
               nanos_
             </div>
             <div className="ml-2 text-xs text-amber-400/50 font-mono self-end">
-              dashboard
+              DASHBOARD
             </div>
           </div>
         </div>
