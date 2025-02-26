@@ -64,6 +64,7 @@ export default function ServerConfiguration() {
       
       // Parse TOML content
       const parsedConfig = TOML.parse(configContent) as unknown as ServerConfig;
+      console.log(parsedConfig);
       
       // Validate required fields
       if (!validateConfig(parsedConfig)) {
