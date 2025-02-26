@@ -11,6 +11,8 @@ import helmet from 'helmet';
 import dotenv from 'dotenv';
 import type { Server as HttpServer } from 'node:http';
 import type { Server as HttpsServer } from 'node:https';
+import { configureSocketHandlers } from './socket/handlers';
+import { initializeDefaultConfig } from './database';
 
 // Load environment variables
 dotenv.config();
@@ -20,7 +22,6 @@ import commandRouter from './handlers/commands';
 import fileRouter from './handlers/files';
 import systemRouter from './handlers/system';
 import userRouter from './handlers/users';
-import { configureSocketHandlers } from './socket/handlers';
 
 // Define interface for custom type
 interface CustomRequest extends express.Request {
@@ -160,6 +161,9 @@ app.prepare().then(() => {
   server.all('*', (req: express.Request, res: express.Response) => {
     return handle(req, res);
   });
+  
+  // Initialize default configuration if none exists
+  initializeDefaultConfig();
   
   // Start the server
   httpServer.listen(port, '0.0.0.0', () => {

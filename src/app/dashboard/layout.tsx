@@ -7,8 +7,21 @@ import { useSocket } from '@/hooks/useSocket';
 import { useUser } from '@/hooks/useUser';
 import NanosOnboarding from '@/components/NanosOnboarding';
 import { toast } from 'react-hot-toast';
+import { SocketProvider } from '@/contexts/SocketContext';
 
 export default function DashboardLayout({
+  children,
+}: {
+  children: React.ReactNode;
+}) {
+  return (
+    <SocketProvider>
+      <DashboardContent>{children}</DashboardContent>
+    </SocketProvider>
+  );
+}
+
+function DashboardContent({
   children,
 }: {
   children: React.ReactNode;
