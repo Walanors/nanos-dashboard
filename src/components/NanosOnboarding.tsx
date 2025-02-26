@@ -101,14 +101,32 @@ export default function NanosOnboarding() {
 
       setInstallationProgress(40);
       addLogMessage('> Installing required dependencies...');
-      // Pre-accept Steam license agreement
+      // Pre-accept Steam license agreement using separate commands
       addLogMessage('> Pre-accepting Steam license agreement...');
-      const setLicense = await executeCommand('echo steam steam/license note \'\' | sudo debconf-set-selections && echo steam steam/question select "I AGREE" | sudo debconf-set-selections');
+      
+      // Create a temporary script for license acceptance
+      const licenseScript = `#!/bin/bash
+echo "steam steam/license note ''" | sudo debconf-set-selections
+echo "steam steam/question select I AGREE" | sudo debconf-set-selections`;
+      
+      const createLicenseScript = await executeCommand('cat << EOF > /tmp/accept_steam_license.sh\n' + licenseScript + '\nEOF');
+      if (createLicenseScript.error) {
+        addLogMessage(`Error creating license script: ${createLicenseScript.error}`);
+        throw new Error(createLicenseScript.error);
+      }
+      
+      const chmodLicenseScript = await executeCommand('chmod +x /tmp/accept_steam_license.sh');
+      if (chmodLicenseScript.error) {
+        addLogMessage(`Error setting license script permissions: ${chmodLicenseScript.error}`);
+        throw new Error(chmodLicenseScript.error);
+      }
+      
+      const setLicense = await executeCommand('sudo /tmp/accept_steam_license.sh');
       if (setLicense.error) {
-        addLogMessage(`Error: ${setLicense.error}`);
+        addLogMessage(`Error accepting Steam license: ${setLicense.error}`);
         throw new Error(setLicense.error);
       }
-      addLogMessage(setLicense.output);
+      addLogMessage(setLicense.output || '> Steam license accepted');
 
       // Using expect-like syntax to handle interactive prompts
       const installDeps = await executeCommand('DEBIAN_FRONTEND=noninteractive sudo -E apt install -y lib32gcc-s1 steamcmd');
