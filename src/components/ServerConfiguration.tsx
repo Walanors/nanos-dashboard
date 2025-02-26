@@ -54,7 +54,7 @@ export default function ServerConfiguration() {
     setIsLoading(true);
     setError(null);
     try {
-      const result = await executeCommand(`cat ${NANOS_INSTALL_DIR}/Config.toml`);
+      const result = await executeCommand(`sudo cat ${NANOS_INSTALL_DIR}/Config.toml`);
       if (result.error) {
         throw new Error(result.error);
       }
@@ -62,17 +62,28 @@ export default function ServerConfiguration() {
       // Clean the output by removing the "Command executed successfully" line
       const configContent = result.output.split('\n').slice(1).join('\n');
       
-      // Parse TOML content
-      const parsedConfig = TOML.parse(configContent) as unknown as ServerConfig;
-      console.log('Checking parsedConfig', parsedConfig);
-      console.log('Checking configContent', configContent);
+      // Log the raw config content for debugging
+      toast.success('Raw config content loaded');
       
-      // Validate required fields
-      if (!validateConfig(parsedConfig)) {
-        throw new Error('Invalid configuration file format');
+      try {
+        // Parse TOML content
+        const parsedConfig = TOML.parse(configContent) as unknown as ServerConfig;
+        
+        // Log the parsed config for debugging
+        toast.success('TOML parsed successfully');
+        
+        // Validate required fields
+        if (!validateConfig(parsedConfig)) {
+          toast.error('Config validation failed');
+          throw new Error('Invalid configuration file format');
+        }
+        
+        toast.success('Config validation passed');
+        setConfig(parsedConfig);
+      } catch (parseError) {
+        toast.error(`TOML Parse error: ${(parseError as Error).message}`);
+        throw new Error(`Failed to parse TOML: ${(parseError as Error).message}`);
       }
-      
-      setConfig(parsedConfig);
     } catch (err) {
       const errorMessage = (err as Error).message;
       setError(errorMessage);
