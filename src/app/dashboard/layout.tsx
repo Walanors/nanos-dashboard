@@ -73,14 +73,13 @@ export default function DashboardLayout({
       if (buildResult.error) {
         throw new Error(buildResult.error);
       }
-      
+      toast.success('Update installed successfully. The service will restart momentarily. You will be able to refresh the page to see the changes.');
       // Restart the service
       const restartResult = await executeCommand('sudo systemctl restart nanos-dashboard.service');
       if (restartResult.error) {
         throw new Error(restartResult.error);
       }
       
-      toast.success('Update installed successfully. The service will restart momentarily.');
     } catch (error) {
       console.error('Update failed:', error);
       toast.error(`Update failed: ${(error as Error).message}`);
