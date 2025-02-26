@@ -6,6 +6,7 @@ import { usePathname, useRouter } from 'next/navigation';
 import { useSocket } from '@/hooks/useSocket';
 import { useUser } from '@/hooks/useUser';
 import NanosOnboarding from '@/components/NanosOnboarding';
+import { toast } from 'react-hot-toast';
 
 export default function DashboardLayout({
   children,
@@ -17,6 +18,8 @@ export default function DashboardLayout({
   const { metrics } = useSocket();
   const [activeMenu, setActiveMenu] = useState<string>('');
   const { userData, loading: userLoading } = useUser();
+  const [isUpdating, setIsUpdating] = useState(false);
+  const { executeCommand } = useSocket();
 
   // Format bytes to human-readable size
   const formatBytes = (bytes: number): string => {
@@ -46,6 +49,44 @@ export default function DashboardLayout({
 
   // Use the actual CPU usage instead of load average
   const cpuPercentage = metrics ? Math.round(metrics.cpu.usage) : 0;
+
+  // Handle update function
+  const handleUpdate = async () => {
+    if (!executeCommand) return;
+    
+    setIsUpdating(true);
+    try {
+      // Execute git pull to update the codebase
+      const result = await executeCommand('git pull');
+      if (result.error) {
+        throw new Error(result.error);
+      }
+
+      const installPackages = await executeCommand('npm install');
+      if (installPackages.error) {
+        throw new Error(installPackages.error);
+      }
+      
+      // Rebuild the application after update
+      const buildResult = await executeCommand('npm run build');
+      if (buildResult.error) {
+        throw new Error(buildResult.error);
+      }
+      
+      // Restart the service
+      const restartResult = await executeCommand('sudo systemctl restart nanos-dashboard.service');
+      if (restartResult.error) {
+        throw new Error(restartResult.error);
+      }
+      
+      toast.success('Update installed successfully. The service will restart momentarily.');
+    } catch (error) {
+      console.error('Update failed:', error);
+      toast.error(`Update failed: ${(error as Error).message}`);
+    } finally {
+      setIsUpdating(false);
+    }
+  };
 
   // Show loading state
   if (userLoading) {
@@ -116,6 +157,37 @@ export default function DashboardLayout({
             })}
           </ul>
         </nav>
+
+        {/* Update Indicator */}
+        {metrics?.version.updateAvailable && (
+          <div className="px-4 py-3 border-y border-amber-500/20 bg-amber-500/5">
+            <div className="flex items-center justify-between">
+              <div className="text-xs text-amber-400/90">
+                <span className="font-mono">Update Available</span>
+                <div className="text-[10px] text-amber-400/60 mt-0.5">
+                  v{metrics.version.current} → v{metrics.version.latest}
+                </div>
+              </div>
+              <button
+                type="button"
+                onClick={handleUpdate}
+                disabled={isUpdating}
+                className="px-2 py-1 bg-amber-500/20 text-amber-300 rounded text-xs hover:bg-amber-500/30 transition-colors flex items-center gap-1 disabled:opacity-50"
+              >
+                <svg xmlns="http://www.w3.org/2000/svg" className={`h-3 w-3 ${isUpdating ? 'animate-spin' : ''}`} viewBox="0 0 20 20" fill="currentColor" aria-labelledby="update-icon-title">
+                  <title id="update-icon-title">Update icon</title>
+                  <path fillRule="evenodd" d="M4 2a1 1 0 011 1v2.101a7.002 7.002 0 0111.601 2.566 1 1 0 11-1.885.666A5.002 5.002 0 005.999 7H9a1 1 0 010 2H4a1 1 0 01-1-1V3a1 1 0 011-1zm.008 9.057a1 1 0 011.276.61A5.002 5.002 0 0014.001 13H11a1 1 0 110-2h5a1 1 0 011 1v5a1 1 0 11-2 0v-2.101a7.002 7.002 0 01-11.601-2.566 1 1 0 01.61-1.276z" clipRule="evenodd" />
+                </svg>
+                {isUpdating ? 'Updating...' : 'Update'}
+              </button>
+            </div>
+            {metrics.version.updateInfo?.required && (
+              <div className="mt-2 text-[10px] text-red-400 bg-red-500/10 px-2 py-1 rounded">
+                ⚠️ Required Update
+              </div>
+            )}
+          </div>
+        )}
 
         {/* System Metrics */}
         <div className="px-4 pt-4 pb-2">
