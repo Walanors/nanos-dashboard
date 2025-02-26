@@ -99,10 +99,33 @@ export default function ServerConfiguration() {
     setIsLoading(true);
     setError(null);
     try {
-      // First check if we can connect to the socket
-      const testConnection = await executeCommand('echo "test connection"');
-      if (testConnection.error) {
-        throw new Error('Socket not connected. Please ensure the service is running.');
+      // Add delay and retry mechanism for socket connection
+      const maxRetries = 3;
+      const delayMs = 1500; // 1.5 seconds delay
+      
+      for (let attempt = 1; attempt <= maxRetries; attempt++) {
+        try {
+          // First check if we can connect to the socket
+          const testConnection = await executeCommand('echo "test connection"');
+          if (!testConnection.error) {
+            break; // Connection successful, proceed with config loading
+          }
+          
+          if (attempt === maxRetries) {
+            throw new Error('Socket not connected after multiple attempts. Please ensure the service is running.');
+          }
+          
+          // Wait before next attempt
+          await new Promise(resolve => setTimeout(resolve, delayMs));
+          console.log(`Retrying connection attempt ${attempt + 1}/${maxRetries}...`);
+          
+        } catch (connError) {
+          if (attempt === maxRetries) {
+            throw connError;
+          }
+          await new Promise(resolve => setTimeout(resolve, delayMs));
+          console.log(`Retrying connection attempt ${attempt + 1}/${maxRetries}...`);
+        }
       }
 
       const result = await executeCommand(`cat "${NANOS_INSTALL_DIR}/Config.toml"`);
