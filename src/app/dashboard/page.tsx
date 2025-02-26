@@ -3,6 +3,8 @@
 import { useEffect, useState } from 'react';
 import { useRouter } from 'next/navigation';
 import { useSocket } from '@/hooks/useSocket';
+import OnboardingStatus from '@/components/OnboardingStatus';
+import { useUser } from '@/hooks/useUser';
 
 // System Info interface
 interface SystemInfo {
@@ -37,6 +39,9 @@ export default function DashboardPage() {
   
   // Get socket connection with metrics
   const { isConnected, error: socketError, executeCommand, metrics } = useSocket();
+  
+  // Get user data including onboarding status
+  const { userData, loading: userLoading } = useUser();
   
   useEffect(() => {
     // Check if user is authenticated
@@ -158,7 +163,7 @@ export default function DashboardPage() {
     return `${Number.parseFloat((bytes / (k ** i)).toFixed(2))} ${sizes[i]}`;
   };
 
-  if (isLoading) {
+  if (isLoading || userLoading) {
     return (
       <div className="flex justify-center items-center h-screen">
         <div className="animate-pulse text-amber-400 text-lg font-mono">
@@ -260,7 +265,7 @@ export default function DashboardPage() {
                       type="button"
                       onClick={handleUpdate}
                       disabled={isUpdating || !isConnected}
-                      className="px-3 py-1 bg-amber-500/20 text-amber-300 rounded hover:bg-amber-500/30 focus:outline-none focus:ring-2 focus:ring-amber-500/50 disabled:opacity-50 transition-all duration-200 text-sm font-mono flex items-center"
+                      className="px-3 py-1 bg-amber-500/20 text-amber-300 rounded hover:bg-amber-500/30 focus:outline-none focus:ring-2 focus:ring-amber-500/50 disabled:opacity-50 transition-all duration-200 border-y border-r border-amber-500/20 font-mono"
                     >
                       {isUpdating ? (
                         <>

@@ -4,6 +4,8 @@ import { useState, useEffect } from 'react';
 import Link from 'next/link';
 import { usePathname, useRouter } from 'next/navigation';
 import { useSocket } from '@/hooks/useSocket';
+import { useUser } from '@/hooks/useUser';
+import NanosOnboarding from '@/components/NanosOnboarding';
 
 export default function DashboardLayout({
   children,
@@ -14,6 +16,7 @@ export default function DashboardLayout({
   const pathname = usePathname();
   const { metrics } = useSocket();
   const [activeMenu, setActiveMenu] = useState<string>('');
+  const { userData, loading: userLoading } = useUser();
 
   // Format bytes to human-readable size
   const formatBytes = (bytes: number): string => {
@@ -44,6 +47,30 @@ export default function DashboardLayout({
   // Use the actual CPU usage instead of load average
   const cpuPercentage = metrics ? Math.round(metrics.cpu.usage) : 0;
 
+  // Show loading state
+  if (userLoading) {
+    return (
+      <div className="flex min-h-screen items-center justify-center bg-gradient-to-br from-black to-zinc-900">
+        <div className="animate-pulse text-amber-400 text-lg font-mono">
+          <span className="mr-2">$</span>
+          Loading...
+        </div>
+      </div>
+    );
+  }
+
+  // If user hasn't completed onboarding, render the onboarding component
+  if (userData && !userData.onboardingCompleted) {
+    return (
+      <div className="min-h-screen bg-gradient-to-br from-black to-zinc-900 flex items-center justify-center p-6">
+        <div className="w-full max-w-4xl">
+          <NanosOnboarding />
+        </div>
+      </div>
+    );
+  }
+
+  // Regular dashboard layout
   return (
     <div className="flex min-h-screen bg-gradient-to-br from-black to-zinc-900 text-amber-50">
       {/* Sidebar */}
