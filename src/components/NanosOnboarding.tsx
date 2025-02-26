@@ -107,6 +107,16 @@ export default function NanosOnboarding() {
       await executeCommand('sudo killall apt apt-get dpkg 2>/dev/null || true');
       await executeCommand('sudo rm -f /var/lib/dpkg/lock* /var/lib/apt/lists/lock* /var/cache/apt/archives/lock* /var/cache/debconf/*.dat.lock 2>/dev/null || true');
       
+      // Fix interrupted dpkg state
+      addLogMessage('> Fixing package manager state...');
+      const fixDpkg = await executeCommand('sudo dpkg --configure -a');
+      if (fixDpkg.error) {
+        addLogMessage(`Warning: Could not fix dpkg state: ${fixDpkg.error}`);
+        // Continue anyway as this might not be fatal
+      } else {
+        addLogMessage('> Package manager state fixed');
+      }
+      
       // Wait a moment for processes to clean up
       await new Promise(resolve => setTimeout(resolve, 2000));
       
@@ -141,7 +151,16 @@ echo steam steam/question select "I AGREE" | debconf-set-selections`;
       }
       addLogMessage(setLicense.output || '> Steam license accepted');
 
+      // Run apt update again to ensure we have a clean state
+      addLogMessage('> Updating package lists again...');
+      const aptUpdateRetry = await executeCommand('sudo apt update');
+      if (aptUpdateRetry.error) {
+        addLogMessage(`Warning: Package list update failed: ${aptUpdateRetry.error}`);
+        // Continue anyway as this might not be fatal
+      }
+
       // Using expect-like syntax to handle interactive prompts
+      addLogMessage('> Installing SteamCMD and dependencies...');
       const installDeps = await executeCommand('DEBIAN_FRONTEND=noninteractive sudo -E apt install -y lib32gcc-s1 steamcmd');
       if (installDeps.error) {
         addLogMessage(`Error: ${installDeps.error}`);
