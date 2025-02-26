@@ -10,6 +10,7 @@
     "setup": "bash setup.sh"
   },
   "dependencies": {
+    "@iarna/toml": "^2.2.5",
     "@types/better-sqlite3": "^7.6.12",
     "@types/node-fetch": "^2.6.12",
     "@types/node-os-utils": "^1.3.4",
@@ -23,6 +24,7 @@
     "node-os-utils": "^1.3.7",
     "react": "^19.0.0",
     "react-dom": "^19.0.0",
+    "react-hot-toast": "^2.5.2",
     "socket.io": "^4.8.1",
     "socket.io-client": "^4.8.1",
     "ts-node": "^10.9.1",

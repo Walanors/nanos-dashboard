@@ -62,8 +62,7 @@ enum OnboardingStep {
   WELCOME = 0,
   VERSION_SELECT = 1,
   INSTALLATION = 2,
-  VALIDATE = 3,
-  COMPLETE = 4
+  COMPLETE = 3
 }
 
 export default function NanosOnboarding() {
@@ -196,15 +195,6 @@ export default function NanosOnboarding() {
     }
   };
   
-  // Function to handle configuration changes
-  const handleConfigChange = async (e: React.ChangeEvent<HTMLInputElement | HTMLSelectElement | HTMLTextAreaElement>) => {
-    // Configuration will be handled in the dashboard
-  };
-  
-  // Function to load initial config values
-  const loadConfigValues = useCallback(async () => {
-    // Configuration will be handled in the dashboard
-  }, []);
 
   // Load config values when reaching configuration step
   useEffect(() => {
@@ -216,33 +206,6 @@ export default function NanosOnboarding() {
     await updateOnboardingStatus(true);
     // Navigate to dashboard or reload page
     window.location.reload();
-  };
-  
-  // Function to validate installation
-  const validateInstallation = async () => {
-    addLogMessage('> Validating installation...');
-    
-    try {
-      // Check if server executable exists
-      const checkExecutable = await executeCommand(`test -f ${NANOS_INSTALL_DIR}/NanosWorldServer.sh && echo "Found" || echo "Not found"`);
-      if (checkExecutable.output.trim() !== "Found") {
-        throw new Error("Server executable not found");
-      }
-      addLogMessage('✓ Server executable found');
-
-      // Check if config file exists
-      const checkConfig = await executeCommand(`test -f ${NANOS_INSTALL_DIR}/Config.toml && echo "Found" || echo "Not found"`);
-      if (checkConfig.output.trim() !== "Found") {
-        throw new Error("Configuration file not found");
-      }
-      addLogMessage('✓ Configuration file found');
-      addLogMessage('> All validation checks passed successfully!');
-      addLogMessage('> You can configure your server later from the dashboard.');
-      handleNextStep();
-    } catch (error) {
-      addLogMessage(`✗ Validation failed: ${(error as Error).message}`);
-      addLogMessage('> Please try reinstalling the server');
-    }
   };
   
   // Render the current step
@@ -377,39 +340,6 @@ export default function NanosOnboarding() {
             </div>
           </div>
         );
-        
-      case OnboardingStep.VALIDATE:
-        return (
-          <div className="space-y-4">
-            <h3 className="text-xl font-semibold text-amber-300 font-mono">Validating Installation</h3>
-            
-            <div className="bg-black/50 p-4 rounded-lg border border-amber-500/10 font-mono text-sm">
-              <div className="h-64 overflow-y-auto space-y-1 mb-4">
-                {installationLog.map((log, index) => (
-                  <div key={`log-${index}-${log.slice(0, 10)}`} className="text-gray-300">{log}</div>
-                ))}
-              </div>
-            </div>
-            
-            <div className="flex justify-between mt-6">
-              <button
-                type="button"
-                onClick={handlePrevStep}
-                className="px-4 py-2 bg-gray-800/50 text-gray-300 rounded hover:bg-gray-800/70 transition-colors font-mono"
-              >
-                &lt; Back
-              </button>
-              <button
-                type="button"
-                onClick={validateInstallation}
-                className="px-4 py-2 bg-amber-500/30 text-amber-300 rounded hover:bg-amber-500/40 transition-colors font-mono"
-              >
-                Validate Installation
-              </button>
-            </div>
-          </div>
-        );
-        
       case OnboardingStep.COMPLETE:
         return (
           <div className="space-y-4">
@@ -470,7 +400,6 @@ export default function NanosOnboarding() {
       { name: 'Welcome', step: OnboardingStep.WELCOME },
       { name: 'Version', step: OnboardingStep.VERSION_SELECT },
       { name: 'Install', step: OnboardingStep.INSTALLATION },
-      { name: 'Validate', step: OnboardingStep.VALIDATE },
       { name: 'Complete', step: OnboardingStep.COMPLETE }
     ];
     

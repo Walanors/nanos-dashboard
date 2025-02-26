@@ -5,6 +5,7 @@ import { useRouter } from 'next/navigation';
 import { useSocket } from '@/hooks/useSocket';
 import OnboardingStatus from '@/components/OnboardingStatus';
 import { useUser } from '@/hooks/useUser';
+import ServerConfiguration from '@/components/ServerConfiguration';
 
 // System Info interface
 interface SystemInfo {
@@ -36,6 +37,7 @@ export default function DashboardPage() {
   const [command, setCommand] = useState<string>('');
   const [isExecuting, setIsExecuting] = useState(false);
   const [isUpdating, setIsUpdating] = useState(false);
+  const [activeTab, setActiveTab] = useState('configuration');
   
   // Get socket connection with metrics
   const { isConnected, error: socketError, executeCommand, metrics } = useSocket();
@@ -167,6 +169,16 @@ export default function DashboardPage() {
     return `${Number.parseFloat((bytes / (k ** i)).toFixed(2))} ${sizes[i]}`;
   };
 
+  const renderContent = () => {
+    switch (activeTab) {
+      case 'configuration':
+        return <ServerConfiguration />;
+      // Add other tabs here
+      default:
+        return null;
+    }
+  };
+
   if (isLoading || userLoading) {
     return (
       <div className="flex justify-center items-center h-screen">
@@ -183,179 +195,29 @@ export default function DashboardPage() {
   }
 
   return (
-    <div className="h-screen p-6 overflow-auto">
-      {/* Connection status indicator */}
-      <div className="flex justify-end items-center mb-4">
-        {socketError && (
-          <div className="text-sm text-red-400 mr-4 font-mono">
-            <span className="text-red-500 mr-1">!</span>
-            Socket error: {socketError}
-          </div>
-        )}
-        {isConnected ? (
-          <span className="inline-flex items-center px-2.5 py-1 rounded-full text-xs font-medium bg-zinc-900/70 text-green-400 border border-green-900/50">
-            <span className="w-2 h-2 mr-1 bg-green-400 rounded-full animate-pulse" />
-            Connected
-          </span>
-        ) : (
-          <span className="inline-flex items-center px-2.5 py-1 rounded-full text-xs font-medium bg-zinc-900/70 text-red-400 border border-red-900/50">
-            <span className="w-2 h-2 mr-1 bg-red-400 rounded-full" />
-            Disconnected
-          </span>
-        )}
-      </div>
-      
-      {/* Page heading */}
-      <h1 className="text-2xl font-bold text-amber-300 mb-6 font-mono border-b border-amber-500/20 pb-2">
-        Overview
-      </h1>
-      
-      <div className="grid grid-cols-1 lg:grid-cols-2 gap-6">
-        {/* System Information Panel */}
-        <div className="backdrop-blur-sm backdrop-filter bg-black/40 p-6 rounded-xl shadow-xl border border-amber-500/20 transition-all duration-300 hover:bg-black/50">
-          <h2 className="text-xl font-semibold mb-4 border-b border-amber-500/20 pb-2 text-amber-300 font-mono">
-            <span className="mr-2">$</span>
-            System Information
-          </h2>
-          {systemInfo ? (
-            <div className="grid grid-cols-2 gap-4">
-              <div className="backdrop-blur-sm bg-black/20 p-3 rounded-lg border border-amber-500/10">
-                <span className="text-amber-400/70 text-sm font-mono">Hostname</span>
-                <p className="text-amber-100 font-mono">{systemInfo.hostname}</p>
-              </div>
-              <div className="backdrop-blur-sm bg-black/20 p-3 rounded-lg border border-amber-500/10">
-                <span className="text-amber-400/70 text-sm font-mono">Platform</span>
-                <p className="text-amber-100 font-mono">{systemInfo.platform}</p>
-              </div>
-              <div className="backdrop-blur-sm bg-black/20 p-3 rounded-lg border border-amber-500/10">
-                <span className="text-amber-400/70 text-sm font-mono">Architecture</span>
-                <p className="text-amber-100 font-mono">{systemInfo.arch}</p>
-              </div>
-              <div className="backdrop-blur-sm bg-black/20 p-3 rounded-lg border border-amber-500/10">
-                <span className="text-amber-400/70 text-sm font-mono">CPU Cores</span>
-                <p className="text-amber-100 font-mono">{systemInfo.cpus}</p>
-              </div>
-            </div>
-          ) : (
-            <p className="text-amber-400 font-mono">Unable to load system information</p>
-          )}
-          
-          {/* Uptime information */}
-          {systemInfo && (
-            <div className="mt-6">
-              <div className="backdrop-blur-sm bg-black/20 p-3 rounded-lg border border-amber-500/10">
-                <span className="text-amber-400/70 text-sm font-mono">System Uptime</span>
-                <p className="text-amber-100 font-mono">{formatUptime(systemInfo.uptime)}</p>
-              </div>
-            </div>
-          )}
-          
-          {/* Version Information */}
-          {metrics && (
-            <div className="mt-6">
-              <div className="backdrop-blur-sm bg-black/20 p-3 rounded-lg border border-amber-500/10">
-                <span className="text-amber-400/70 text-sm font-mono">Version</span>
-                <div className="flex items-center justify-between">
-                  <p className="text-amber-100 font-mono">
-                    {metrics.version.current}
-                    {metrics.version.updateAvailable && (
-                      <span className="ml-2 text-xs text-amber-400">
-                        (Latest: {metrics.version.latest})
-                      </span>
-                    )}
-                  </p>
-                  {metrics.version.updateAvailable && (
-                    <button
-                      type="button"
-                      onClick={handleUpdate}
-                      disabled={isUpdating || !isConnected}
-                      className="px-3 py-1 bg-amber-500/20 text-amber-300 rounded hover:bg-amber-500/30 focus:outline-none focus:ring-2 focus:ring-amber-500/50 disabled:opacity-50 transition-all duration-200 border-y border-r border-amber-500/20 font-mono"
-                    >
-                      {isUpdating ? (
-                        <>
-                          <span className="w-2 h-2 mr-2 bg-amber-400 rounded-full animate-pulse" />
-                          Updating...
-                        </>
-                      ) : (
-                        <>
-                          <span className="mr-2">⟳</span>
-                          Update
-                        </>
-                      )}
-                    </button>
-                  )}
-                </div>
-                {metrics.version.updateInfo?.changelog && (
-                  <div className="mt-2 text-xs text-amber-400/70 font-mono">
-                    <div className="border-t border-amber-500/10 pt-2 mt-2">
-                      <strong>Changelog:</strong>
-                      <pre className="mt-1 whitespace-pre-wrap">
-                        {metrics.version.updateInfo.changelog}
-                      </pre>
-                    </div>
-                  </div>
-                )}
-              </div>
-            </div>
-          )}
-        </div>
+    <div className="min-h-screen bg-black/95">
+      <div className="container mx-auto px-4 py-8">
+        <h1 className="text-2xl font-bold text-amber-300 mb-8 font-mono">Server Dashboard</h1>
         
-        {/* Terminal Panel */}
-        <div className="backdrop-blur-sm backdrop-filter bg-black/40 p-6 rounded-xl shadow-xl border border-amber-500/20 transition-all duration-300 hover:bg-black/50">
-          <h2 className="text-xl font-semibold mb-4 border-b border-amber-500/20 pb-2 text-amber-300 font-mono">
-            <span className="mr-2">$</span>
-            Quick Command
-          </h2>
-          <div className="mb-4 bg-zinc-900/50 border border-amber-500/20 p-4 rounded-lg h-60 overflow-y-auto font-mono text-sm text-amber-300 shadow-[inset_0_0_10px_rgba(0,0,0,0.6)]">
-            <pre className="whitespace-pre-wrap">
-              {commandOutput || 'Welcome to Nanos Terminal. Type a command to begin.'}
-            </pre>
-          </div>
-          <form onSubmit={handleExecuteCommand} className="flex">
-            <div className="flex-grow flex items-center bg-zinc-900/50 border border-amber-500/20 rounded-l-md px-2">
-              <span className="text-amber-400 mr-2">$</span>
-              <input
-                type="text"
-                value={command}
-                onChange={(e) => setCommand(e.target.value)}
-                placeholder="Enter command..."
-                disabled={!isConnected || isExecuting}
-                className="flex-grow py-2 bg-transparent text-amber-100 focus:outline-none placeholder-amber-400/30 font-mono"
-              />
-            </div>
-            <button
-              type="submit"
-              disabled={!isConnected || isExecuting || !command.trim()}
-              className="px-4 py-2 bg-amber-500/20 text-amber-300 rounded-r-md hover:bg-amber-500/30 focus:outline-none focus:ring-2 focus:ring-amber-500/50 disabled:opacity-50 transition-all duration-200 border-y border-r border-amber-500/20 font-mono"
-            >
-              {isExecuting ? 'Running...' : 'Run'}
-            </button>
-          </form>
+        {/* Navigation Tabs */}
+        <div className="flex space-x-4 mb-6 border-b border-amber-500/20">
+          <button
+            type="button"
+            onClick={() => setActiveTab('configuration')}
+            className={`px-4 py-2 font-mono text-sm transition-colors ${
+              activeTab === 'configuration'
+                ? 'text-amber-300 border-b-2 border-amber-500'
+                : 'text-gray-400 hover:text-amber-300'
+            }`}
+          >
+            Configuration
+          </button>
+          {/* Add other tabs here */}
         </div>
-        
-        {/* Server Status Panel */}
-        <div className="backdrop-blur-sm backdrop-filter bg-black/40 p-6 rounded-xl shadow-xl border border-amber-500/20 transition-all duration-300 hover:bg-black/50 lg:col-span-2">
-          <h2 className="text-xl font-semibold mb-4 border-b border-amber-500/20 pb-2 text-amber-300 font-mono">
-            <span className="mr-2">$</span>
-            Nanos Server Status
-          </h2>
-          <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
-            <div className="backdrop-blur-sm bg-black/20 p-4 rounded-lg border border-amber-500/10 flex flex-col items-center justify-center">
-              <div className="text-amber-400/70 text-sm font-mono mb-2">Server Status</div>
-              <div className="text-green-400 font-bold font-mono flex items-center">
-                <span className="w-2 h-2 mr-2 bg-green-400 rounded-full animate-pulse" />
-                ONLINE
-              </div>
-            </div>
-            <div className="backdrop-blur-sm bg-black/20 p-4 rounded-lg border border-amber-500/10 flex flex-col items-center justify-center">
-              <div className="text-amber-400/70 text-sm font-mono mb-2">Players</div>
-              <div className="text-amber-300 font-bold font-mono">0 / 32</div>
-            </div>
-            <div className="backdrop-blur-sm bg-black/20 p-4 rounded-lg border border-amber-500/10 flex flex-col items-center justify-center">
-              <div className="text-amber-400/70 text-sm font-mono mb-2">Game Mode</div>
-              <div className="text-amber-300 font-bold font-mono">Sandbox</div>
-            </div>
-          </div>
+
+        {/* Content Area */}
+        <div className="bg-black/40 rounded-lg border border-amber-500/20">
+          {renderContent()}
         </div>
       </div>
     </div>
