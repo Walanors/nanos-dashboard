@@ -641,107 +641,139 @@ export default function FileManager() {
                   </div>
                 </td>
               </tr>
-            ) : files.length === 0 ? (
+            ) : files.length === 0 && breadcrumbs.length <= 1 ? (
               <tr>
                 <td colSpan={4} className="py-4 text-center text-amber-400/70">
                   No files found in this directory
                 </td>
               </tr>
             ) : (
-              files.map((file) => (
-                <tr 
-                  key={file.path} 
-                  className={`border-b border-amber-500/10 hover:bg-amber-500/5 ${isSelected(file.path) ? 'bg-amber-500/20' : ''}`}
-                  onClick={(e) => handleSelect(file.path, e)}
-                  onKeyDown={(e) => handleKeyDown(file.path, e)}
-                  tabIndex={0}
-                  draggable
-                  onDragStart={handleDragStart(file)}
-                >
-                  <td className="py-2">
-                    {file.isDirectory ? (
+              <>
+                {/* Parent Directory Entry (..) - only show when not in root directory */}
+                {breadcrumbs.length > 1 && (
+                  <tr className="border-b border-amber-500/10 hover:bg-amber-500/5">
+                    <td className="py-2">
                       <button
                         type="button"
-                        onClick={(e) => {
-                          e.stopPropagation();
-                          handleDirectoryChange(file.path);
+                        onClick={() => {
+                          const parentPath = pathUtils.dirname(currentPath);
+                          handleDirectoryChange(parentPath);
                         }}
-                        onKeyDown={(e) => {
-                          if (e.key === 'Enter') {
-                            e.stopPropagation();
-                            handleDirectoryChange(file.path);
-                          }
-                        }}
-                        className={`flex items-center ${isSelected(file.path) ? 'text-amber-300' : 'text-amber-300'} hover:underline drop-target`}
+                        className="flex items-center text-amber-300 hover:underline drop-target"
                         onDragOver={handleDragOver}
                         onDragEnter={handleDragEnter}
                         onDragLeave={handleDragLeave}
-                        onDrop={handleDrop(file.path)}
-                        tabIndex={-1}
+                        onDrop={handleDrop(pathUtils.dirname(currentPath))}
                       >
-                        <svg xmlns="http://www.w3.org/2000/svg" className="h-4 w-4 mr-1" viewBox="0 0 20 20" fill="currentColor" aria-labelledby={`folder-icon-${file.name}`}>
-                          <title id={`folder-icon-${file.name}`}>Folder</title>
-                          <path fillRule="evenodd" d="M2 6a2 2 0 012-2h4l2 2h4a2 2 0 012 2v1H8a3 3 0 00-3 3v1.5a1.5 1.5 0 01-3 0V6z" clipRule="evenodd" />
-                          <path d="M6 12a2 2 0 012-2h8a2 2 0 012 2v2a2 2 0 01-2 2H8a2 2 0 01-2-2v-2z" />
+                        <svg xmlns="http://www.w3.org/2000/svg" className="h-4 w-4 mr-1" viewBox="0 0 20 20" fill="currentColor" aria-labelledby="parent-directory-icon">
+                          <title id="parent-directory-icon">Parent Directory</title>
+                          <path fillRule="evenodd" d="M9.707 16.707a1 1 0 01-1.414 0l-6-6a1 1 0 010-1.414l6-6a1 1 0 011.414 1.414L5.414 9H17a1 1 0 110 2H5.414l4.293 4.293a1 1 0 010 1.414z" clipRule="evenodd" />
                         </svg>
-                        {file.name}
+                        .. (Parent Directory)
                       </button>
-                    ) : (
-                      <span className={`flex items-center ${isSelected(file.path) ? 'text-amber-300' : 'text-amber-400/90'}`}>
-                        <svg xmlns="http://www.w3.org/2000/svg" className="h-4 w-4 mr-1" viewBox="0 0 20 20" fill="currentColor" aria-labelledby={`file-icon-${file.name}`}>
-                          <title id={`file-icon-${file.name}`}>File</title>
-                          <path fillRule="evenodd" d="M4 4a2 2 0 012-2h4.586A2 2 0 0112 2.586L15.414 6A2 2 0 0116 7.414V16a2 2 0 01-2 2H6a2 2 0 01-2-2V4z" clipRule="evenodd" />
-                        </svg>
-                        {file.name}
-                      </span>
-                    )}
-                  </td>
-                  <td className="py-2 text-amber-400/70">
-                    {file.isDirectory ? '--' : formatFileSize(file.size)}
-                  </td>
-                  <td className="py-2 text-amber-400/70">
-                    {formatDate(file.modified)}
-                  </td>
-                  <td className="py-2 space-x-2 flex">
-                    <button
-                      type="button"
-                      onClick={(e) => {
-                        e.stopPropagation();
-                        handleDelete(file.path, file.isDirectory);
-                      }}
-                      className="px-2 py-1 bg-red-900/20 text-red-400 rounded hover:bg-red-900/30 transition-colors"
-                      title="Delete"
-                    >
-                      <svg xmlns="http://www.w3.org/2000/svg" className="h-3 w-3" viewBox="0 0 20 20" fill="currentColor" aria-labelledby={`delete-icon-${file.name}`}>
-                        <title id={`delete-icon-${file.name}`}>Delete</title>
-                        <path fillRule="evenodd" d="M9 2a1 1 0 00-.894.553L7.382 4H4a1 1 0 000 2v10a2 2 0 002 2h8a2 2 0 002-2V6a1 1 0 100-2h-3.382l-.724-1.447A1 1 0 0011 2H9zM7 8a1 1 0 012 0v6a1 1 0 11-2 0V8zm5-1a1 1 0 00-1 1v6a1 1 0 102 0V8a1 1 0 00-1-1z" clipRule="evenodd" />
-                      </svg>
-                    </button>
-                    
-                    {!file.isDirectory && isExtractable(file.name) && (
+                    </td>
+                    <td className="py-2 text-amber-400/70">--</td>
+                    <td className="py-2 text-amber-400/70">--</td>
+                    <td className="py-2">--</td>
+                  </tr>
+                )}
+
+                {/* Regular file entries */}
+                {files.map((file) => (
+                  <tr 
+                    key={file.path} 
+                    className={`border-b border-amber-500/10 hover:bg-amber-500/5 ${isSelected(file.path) ? 'bg-amber-500/20' : ''}`}
+                    onClick={(e) => handleSelect(file.path, e)}
+                    onKeyDown={(e) => handleKeyDown(file.path, e)}
+                    tabIndex={0}
+                    draggable
+                    onDragStart={handleDragStart(file)}
+                  >
+                    <td className="py-2">
+                      {file.isDirectory ? (
+                        <button
+                          type="button"
+                          onClick={(e) => {
+                            e.stopPropagation();
+                            handleDirectoryChange(file.path);
+                          }}
+                          onKeyDown={(e) => {
+                            if (e.key === 'Enter') {
+                              e.stopPropagation();
+                              handleDirectoryChange(file.path);
+                            }
+                          }}
+                          className={`flex items-center ${isSelected(file.path) ? 'text-amber-300' : 'text-amber-300'} hover:underline drop-target`}
+                          onDragOver={handleDragOver}
+                          onDragEnter={handleDragEnter}
+                          onDragLeave={handleDragLeave}
+                          onDrop={handleDrop(file.path)}
+                          tabIndex={-1}
+                        >
+                          <svg xmlns="http://www.w3.org/2000/svg" className="h-4 w-4 mr-1" viewBox="0 0 20 20" fill="currentColor" aria-labelledby={`folder-icon-${file.name}`}>
+                            <title id={`folder-icon-${file.name}`}>Folder</title>
+                            <path fillRule="evenodd" d="M2 6a2 2 0 012-2h4l2 2h4a2 2 0 012 2v1H8a3 3 0 00-3 3v1.5a1.5 1.5 0 01-3 0V6z" clipRule="evenodd" />
+                            <path d="M6 12a2 2 0 012-2h8a2 2 0 012 2v2a2 2 0 01-2 2H8a2 2 0 01-2-2v-2z" />
+                          </svg>
+                          {file.name}
+                        </button>
+                      ) : (
+                        <span className={`flex items-center ${isSelected(file.path) ? 'text-amber-300' : 'text-amber-400/90'}`}>
+                          <svg xmlns="http://www.w3.org/2000/svg" className="h-4 w-4 mr-1" viewBox="0 0 20 20" fill="currentColor" aria-labelledby={`file-icon-${file.name}`}>
+                            <title id={`file-icon-${file.name}`}>File</title>
+                            <path fillRule="evenodd" d="M4 4a2 2 0 012-2h4.586A2 2 0 0112 2.586L15.414 6A2 2 0 0116 7.414V16a2 2 0 01-2 2H6a2 2 0 01-2-2V4z" clipRule="evenodd" />
+                          </svg>
+                          {file.name}
+                        </span>
+                      )}
+                    </td>
+                    <td className="py-2 text-amber-400/70">
+                      {file.isDirectory ? '--' : formatFileSize(file.size)}
+                    </td>
+                    <td className="py-2 text-amber-400/70">
+                      {formatDate(file.modified)}
+                    </td>
+                    <td className="py-2 space-x-2 flex">
                       <button
                         type="button"
                         onClick={(e) => {
                           e.stopPropagation();
-                          handleExtract(file.path);
+                          handleDelete(file.path, file.isDirectory);
                         }}
-                        disabled={isExtracting}
-                        className="px-2 py-1 bg-amber-500/20 text-amber-300 rounded hover:bg-amber-500/30 transition-colors disabled:opacity-50"
-                        title="Extract"
+                        className="px-2 py-1 bg-red-900/20 text-red-400 rounded hover:bg-red-900/30 transition-colors"
+                        title="Delete"
                       >
-                        {isExtracting ? (
-                          <div className="h-3 w-3 animate-spin rounded-full border-t-2 border-amber-400 border-r-2 border-amber-400/30" />
-                        ) : (
-                          <svg xmlns="http://www.w3.org/2000/svg" className="h-3 w-3" viewBox="0 0 20 20" fill="currentColor" aria-labelledby={`extract-icon-${file.name}`}>
-                            <title id={`extract-icon-${file.name}`}>Extract</title>
-                            <path fillRule="evenodd" d="M5 2a1 1 0 011 1v1h1a1 1 0 010 2H6v1a1 1 0 01-2 0V6H3a1 1 0 010-2h1V3a1 1 0 011-1zm0 10a1 1 0 011 1v1h1a1 1 0 110 2H6v1a1 1 0 11-2 0v-1H3a1 1 0 110-2h1v-1a1 1 0 011-1zM12 2a1 1 0 01.967.744L14.146 7.2 17.5 9.134a1 1 0 010 1.732l-3.354 1.935-1.18 4.455a1 1 0 01-1.933 0L9.854 12.8 6.5 10.866a1 1 0 010-1.732l3.354-1.935 1.18-4.455A1 1 0 0112 2z" clipRule="evenodd" />
-                          </svg>
-                        )}
+                        <svg xmlns="http://www.w3.org/2000/svg" className="h-3 w-3" viewBox="0 0 20 20" fill="currentColor" aria-labelledby={`delete-icon-${file.name}`}>
+                          <title id={`delete-icon-${file.name}`}>Delete</title>
+                          <path fillRule="evenodd" d="M9 2a1 1 0 00-.894.553L7.382 4H4a1 1 0 000 2v10a2 2 0 002 2h8a2 2 0 002-2V6a1 1 0 100-2h-3.382l-.724-1.447A1 1 0 0011 2H9zM7 8a1 1 0 012 0v6a1 1 0 11-2 0V8zm5-1a1 1 0 00-1 1v6a1 1 0 102 0V8a1 1 0 00-1-1z" clipRule="evenodd" />
+                        </svg>
                       </button>
-                    )}
-                  </td>
-                </tr>
-              ))
+                      
+                      {!file.isDirectory && isExtractable(file.name) && (
+                        <button
+                          type="button"
+                          onClick={(e) => {
+                            e.stopPropagation();
+                            handleExtract(file.path);
+                          }}
+                          disabled={isExtracting}
+                          className="px-2 py-1 bg-amber-500/20 text-amber-300 rounded hover:bg-amber-500/30 transition-colors disabled:opacity-50"
+                          title="Extract"
+                        >
+                          {isExtracting ? (
+                            <div className="h-3 w-3 animate-spin rounded-full border-t-2 border-amber-400 border-r-2 border-amber-400/30" />
+                          ) : (
+                            <svg xmlns="http://www.w3.org/2000/svg" className="h-3 w-3" viewBox="0 0 20 20" fill="currentColor" aria-labelledby={`extract-icon-${file.name}`}>
+                              <title id={`extract-icon-${file.name}`}>Extract</title>
+                              <path fillRule="evenodd" d="M5 2a1 1 0 011 1v1h1a1 1 0 010 2H6v1a1 1 0 01-2 0V6H3a1 1 0 010-2h1V3a1 1 0 011-1zm0 10a1 1 0 011 1v1h1a1 1 0 110 2H6v1a1 1 0 11-2 0v-1H3a1 1 0 110-2h1v-1a1 1 0 011-1zM12 2a1 1 0 01.967.744L14.146 7.2 17.5 9.134a1 1 0 010 1.732l-3.354 1.935-1.18 4.455a1 1 0 01-1.933 0L9.854 12.8 6.5 10.866a1 1 0 010-1.732l3.354-1.935 1.18-4.455A1 1 0 0112 2z" clipRule="evenodd" />
+                            </svg>
+                          )}
+                        </button>
+                      )}
+                    </td>
+                  </tr>
+                ))}
+              </>
             )}
           </tbody>
         </table>
