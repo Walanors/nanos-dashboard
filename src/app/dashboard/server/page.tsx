@@ -298,8 +298,6 @@ export default function ServerPage() {
       const newLogs = logs.slice(lastLogIndex);
       
       if (newLogs.length > 0) {
-        console.log(`Displaying ${newLogs.length} new log entries`);
-        
         // Save current line content and cursor position
         const currentLine = xtermRef.current.buffer.active.getLine(xtermRef.current.buffer.active.cursorY)?.translateToString() || '';
         const cursorX = xtermRef.current.buffer.active.cursorX;

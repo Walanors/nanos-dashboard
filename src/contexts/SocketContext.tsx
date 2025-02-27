@@ -825,18 +825,34 @@ export function SocketProvider({ children }: { children: ReactNode }) {
     
     setLogs(prevLogs => {
       if (data.type === 'initial') {
-        // Replace logs with initial data
-        return processedLogs;
+        // When getting initial logs, handle duplication prevention differently
+        // We want to keep these logs regardless, but we should deduplicate them
+        const uniqueLogs = [];
+        const seenLines = new Set();
+        
+        for (const log of processedLogs) {
+          // Skip empty lines
+          if (!log) continue;
+          
+          // Skip duplicates by using a Set to track seen lines
+          if (!seenLines.has(log)) {
+            seenLines.add(log);
+            uniqueLogs.push(log);
+          }
+        }
+        
+        return uniqueLogs;
       }
       
-      // For incremental updates, check for duplicates
-      // Get the last few logs to check for duplicates (increased from 10 to 20 for better duplicate detection)
-      const lastLogs = prevLogs.slice(-20);
+      // For incremental updates, we need to be more sophisticated with duplicate detection
+      // Hash for tracking seen logs to avoid duplicates
+      const seenLogs = new Set(prevLogs.slice(-100));  // Increased to 100 for better duplicate detection
       
-      // Filter out any logs that are exact duplicates of recent logs
-      const uniqueNewLogs = processedLogs.filter(newLog => 
-        !lastLogs.some(existingLog => existingLog === newLog)
-      );
+      // Filter out duplicates
+      const uniqueNewLogs = processedLogs.filter(log => {
+        if (!log) return false;
+        return !seenLogs.has(log);
+      });
       
       if (uniqueNewLogs.length === 0) return prevLogs;
       

@@ -751,14 +751,18 @@ export function configureSocketHandlers(io: Server): void {
         console.log('Setting up real-time log streaming for socket', userSocket.id);
         
         try {
+          // Store the last line to prevent duplicates
+          let lastLine = '';
+          
           // Use tail -f for true streaming with line buffering (-n 0 to avoid repeating lines)
-          const tailProcess = exec(`tail -f -n 0 ${NANOS_LOG_PATH}`);
+          // Adding --follow=name to handle log rotation better
+          const tailProcess = exec(`tail -f --follow=name -n 0 ${NANOS_LOG_PATH}`);
           
           if (!tailProcess.stdout) {
             throw new Error('Failed to create tail process stdout');
           }
           
-          // Process log lines one by one in real-time
+          // Process log lines one by one in real-time with more robust handling
           let buffer = '';
           tailProcess.stdout.on('data', (data) => {
             // Append new data to buffer
@@ -770,11 +774,19 @@ export function configureSocketHandlers(io: Server): void {
               // Keep the last incomplete line in the buffer
               buffer = lines.pop() || '';
               
-              // Only emit if we have complete lines
-              if (lines.length > 0) {
+              // Filter out empty lines and duplicates
+              const uniqueLines = lines
+                .filter(line => line.trim().length > 0) // Filter empty lines
+                .filter(line => line !== lastLine);     // Filter out immediate duplicates
+              
+              // Only emit if we have unique complete lines
+              if (uniqueLines.length > 0) {
+                // Update the last line to prevent duplicates
+                lastLine = uniqueLines[uniqueLines.length - 1];
+                
                 userSocket.emit('log_data', {
                   type: 'update',
-                  logs: lines
+                  logs: uniqueLines
                 });
               }
             }
