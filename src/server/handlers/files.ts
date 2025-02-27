@@ -458,18 +458,21 @@ router.post('/extract', async (req: RequestWithUser, res: Response): Promise<voi
 
     // Determine the appropriate extraction command based on file extension
     if (filePath.endsWith('.zip')) {
-      extractCommand = `unzip -o "${filePath}" -d "${targetDir}"`;
+      extractCommand = `unzip -o "${filePath}" -d "${targetDir}" > /dev/null`;
     } else if (filePath.endsWith('.tar')) {
-      extractCommand = `tar -xf "${filePath}" -C "${targetDir}"`;
+      extractCommand = `tar -xf "${filePath}" -C "${targetDir}" > /dev/null`;
     } else if (filePath.endsWith('.tar.gz') || filePath.endsWith('.tgz')) {
-      extractCommand = `tar -xzf "${filePath}" -C "${targetDir}"`;
+      extractCommand = `tar -xzf "${filePath}" -C "${targetDir}" > /dev/null`;
     } else {
       res.status(400).json({ success: false, error: 'Unsupported archive format' });
       return;
     }
 
-    // Execute the extraction command
-    await execPromise(extractCommand);
+    // Execute the extraction command with increased buffer size and timeout
+    await execPromise(extractCommand, { 
+      maxBuffer: 1024 * 1024 * 50, // 50MB buffer size
+      timeout: 30 * 60 * 1000 // 30 minute timeout for large extractions
+    });
     
     console.log(`File extracted by ${req.user?.username || 'unknown user'}: ${filePath}`);
     
