@@ -260,11 +260,10 @@ export default function ServerPage() {
   // Subscribe to logs when component mounts
   useEffect(() => {
     if (!isSubscribedToLogs) {
-      console.log('Subscribing to server logs with real-time option');
-      // Subscribe with a smaller batch size and real-time option for more frequent updates
+      console.log('Subscribing to server logs');
+      // Subscribe with a smaller batch size for more frequent updates
       subscribeToLogs({ 
-        initialLines: 50,
-        realtime: true
+        initialLines: 50
       })
         .then(() => {
           console.log('Successfully subscribed to server logs');
@@ -535,8 +534,7 @@ export default function ServerPage() {
                 unsubscribeFromLogs();
                 // Use a smaller batch size for more frequent updates
                 subscribeToLogs({ 
-                  initialLines: 50,
-                  realtime: true 
+                  initialLines: 50
                 });
                 
                 // Don't show refresh message in terminal

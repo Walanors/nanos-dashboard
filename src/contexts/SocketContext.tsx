@@ -98,7 +98,7 @@ interface SocketContextType {
   logs: string[];
   isSubscribedToLogs: boolean;
   isLoadingLogs: boolean;
-  subscribeToLogs: (options?: { initialLines?: number; fullHistory?: boolean; realtime?: boolean }) => Promise<void>;
+  subscribeToLogs: (options?: { initialLines?: number; fullHistory?: boolean }) => Promise<void>;
   unsubscribeFromLogs: () => void;
   clearLogs: () => void;
 }
@@ -818,10 +818,7 @@ export function SocketProvider({ children }: { children: ReactNode }) {
           lowerLog.includes('command executed successfully')
         );
       })
-      .map(log => {
-        // Clean up log entries to ensure consistent formatting
-        return log.trim();
-      });
+      .map(log => log.trim());
     
     // Only update if we have logs to add
     if (processedLogs.length === 0) return;
@@ -829,27 +826,19 @@ export function SocketProvider({ children }: { children: ReactNode }) {
     setLogs(prevLogs => {
       if (data.type === 'initial') {
         // Replace logs with initial data
-        console.log(`Replacing logs with ${processedLogs.length} initial entries`);
         return processedLogs;
       }
       
       // For incremental updates, check for duplicates
-      console.log(`Processing ${processedLogs.length} new log entries`);
-      
-      // Get the last few logs to check for duplicates
-      const lastLogs = prevLogs.slice(-10);
+      // Get the last few logs to check for duplicates (increased from 10 to 20 for better duplicate detection)
+      const lastLogs = prevLogs.slice(-20);
       
       // Filter out any logs that are exact duplicates of recent logs
-      const uniqueNewLogs = processedLogs.filter(newLog => {
-        return !lastLogs.some(existingLog => existingLog === newLog);
-      });
+      const uniqueNewLogs = processedLogs.filter(newLog => 
+        !lastLogs.some(existingLog => existingLog === newLog)
+      );
       
-      if (uniqueNewLogs.length === 0) {
-        console.log('All new logs were duplicates, not updating');
-        return prevLogs;
-      }
-      
-      console.log(`Adding ${uniqueNewLogs.length} unique new log entries`);
+      if (uniqueNewLogs.length === 0) return prevLogs;
       
       // Add new logs while respecting the max limit
       const newLogs = [...prevLogs, ...uniqueNewLogs];
@@ -857,7 +846,7 @@ export function SocketProvider({ children }: { children: ReactNode }) {
     });
   }, []);
   
-  const subscribeToLogs = useCallback((options: { initialLines?: number; fullHistory?: boolean; realtime?: boolean } = {}): Promise<void> => {
+  const subscribeToLogs = useCallback((options: { initialLines?: number; fullHistory?: boolean } = {}): Promise<void> => {
     return new Promise((resolve, reject) => {
       if (!socket || !connectionState.connected) {
         reject(new Error('Socket not connected'));
@@ -881,16 +870,15 @@ export function SocketProvider({ children }: { children: ReactNode }) {
         setIsLoadingLogs(false);
         socket.off('log_data');
         reject(new Error('Log subscription request timed out'));
-      }, 5000); // 5 seconds timeout instead of default
+      }, 5000);
       
-      // Always enable realtime option for better responsiveness
+      // Send subscription request with options
+      // Note: realtime parameter removed as server now always streams in real-time
       const subscribeOptions = {
         initialLines: options.initialLines || 50,
-        fullHistory: options.fullHistory || false,
-        realtime: true // Always use realtime mode
+        fullHistory: options.fullHistory || false
       };
       
-      // Subscribe to logs with real-time option
       socket.emit('subscribe_logs', subscribeOptions, (response: {
         success: boolean;
         message?: string;
@@ -911,7 +899,7 @@ export function SocketProvider({ children }: { children: ReactNode }) {
     });
   }, [socket, connectionState.connected, handleLogData, isSubscribedToLogs]);
   
-  // Restore the unsubscribeFromLogs function
+  // Function to unsubscribe from logs
   const unsubscribeFromLogs = useCallback(() => {
     if (socket) {
       socket.off('log_data');
@@ -919,7 +907,7 @@ export function SocketProvider({ children }: { children: ReactNode }) {
       setIsSubscribedToLogs(false);
     }
   }, [socket]);
-  
+
   // Effect to check server status when socket connects
   useEffect(() => {
     if (socket && connectionState.connected) {

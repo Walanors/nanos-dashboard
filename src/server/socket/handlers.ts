@@ -693,8 +693,7 @@ export function configureSocketHandlers(io: Server): void {
     // Subscribe to server logs
     userSocket.on('subscribe_logs', async (options: { 
       initialLines?: number, 
-      fullHistory?: boolean,
-      realtime?: boolean
+      fullHistory?: boolean
     } = {}, callback?: SocketCallback<ServerResponse>) => {
       try {
         console.log(`Log subscription from ${userSocket.data.user.username}`, options);
@@ -727,7 +726,6 @@ export function configureSocketHandlers(io: Server): void {
         // Default options
         const initialLines = options.initialLines || 100;
         const fullHistory = options.fullHistory || false;
-        const realtime = options.realtime !== undefined ? options.realtime : true; // Default to true for realtime
 
         // Send initial logs if requested
         if (initialLines > 0 || fullHistory) {
@@ -749,239 +747,135 @@ export function configureSocketHandlers(io: Server): void {
           }
         }
 
-        // Use tail -f for true streaming of logs
-        if (realtime) {
-          console.log('Setting up true log streaming for socket', userSocket.id);
+        // Setup real-time log streaming using tail -f
+        console.log('Setting up real-time log streaming for socket', userSocket.id);
+        
+        try {
+          // Use tail -f for true streaming with line buffering (-n 0 to avoid repeating lines)
+          const tailProcess = exec(`tail -f -n 0 ${NANOS_LOG_PATH}`);
           
-          try {
-            // Get file size to track position
-            const stats = await fsPromises.stat(NANOS_LOG_PATH);
-            const lastPosition = stats.size;
-            
-            // Use tail -f for true streaming
-            const tailProcess = exec(`tail -f -n 0 ${NANOS_LOG_PATH}`);
-            
-            if (!tailProcess.stdout) {
-              throw new Error('Failed to create tail process stdout');
-            }
-            
-            // Set up data handler for the tail process
-            let buffer = '';
-            tailProcess.stdout.on('data', (data) => {
-              // Append new data to buffer
-              buffer += data.toString();
-              
-              // Process complete lines
-              if (buffer.includes('\n')) {
-                const lines = buffer.split('\n');
-                // Keep the last incomplete line in the buffer
-                buffer = lines.pop() || '';
-                
-                // Only emit if we have complete lines
-                if (lines.length > 0) {
-                  userSocket.emit('log_data', {
-                    type: 'update',
-                    logs: lines
-                  });
-                }
-              }
-            });
-            
-            // Handle errors
-            tailProcess.on('error', (error) => {
-              console.error('Tail process error:', error);
-            });
-            
-            // Store references for cleanup
-            logWatchers.set(userSocket.id, { 
-              watcher: { 
-                close: () => {
-                  tailProcess.kill();
-                } 
-              } as CustomWatcher, 
-              tail: tailProcess.stdout,
-              lastPosition
-            });
-            
-            if (callback) {
-              callback({
-                success: true,
-                message: 'Subscribed to log updates (streaming mode)'
-              });
-            }
-          } catch (error) {
-            console.error('Error setting up log streaming:', error);
-            
-            // Fall back to file watching as a backup
-            try {
-              console.log('Falling back to file watching for socket', userSocket.id);
-              
-              // Get file size to track position
-              const stats = await fsPromises.stat(NANOS_LOG_PATH);
-              let lastPosition = stats.size;
-              
-              const watcher = watch(NANOS_LOG_PATH, { persistent: true }, async (eventType) => {
-                if (eventType === 'change') {
-                  try {
-                    // Get current file size
-                    const newStats = await fsPromises.stat(NANOS_LOG_PATH);
-                    
-                    // Only read if file has grown
-                    if (newStats.size > lastPosition) {
-                      // Read only the new content
-                      const fileHandle = await fsPromises.open(NANOS_LOG_PATH, 'r');
-                      const buffer = Buffer.alloc(newStats.size - lastPosition);
-                      
-                      await fileHandle.read(buffer, 0, buffer.length, lastPosition);
-                      await fileHandle.close();
-                      
-                      // Update last position
-                      lastPosition = newStats.size;
-                      
-                      // Convert buffer to string and split into lines
-                      const content = buffer.toString();
-                      if (content.trim()) {
-                        const lines = content.split('\n').filter(Boolean);
-                        if (lines.length > 0) {
-                          userSocket.emit('log_data', {
-                            type: 'update',
-                            logs: lines
-                          });
-                        }
-                      }
-                    }
-                  } catch (readError) {
-                    console.error('Error reading file changes:', readError);
-                  }
-                }
-              });
-              
-              // Store watcher reference for cleanup
-              logWatchers.set(userSocket.id, { 
-                watcher, 
-                tail: null,
-                lastPosition
-              });
-              
-              if (callback) {
-                callback({
-                  success: true,
-                  message: 'Subscribed to log updates (file watch mode)'
-                });
-              }
-            } catch (watchError) {
-              console.error('Error setting up file watcher:', watchError);
-              
-              // Last resort: polling
-              console.log('Falling back to polling for socket', userSocket.id);
-              
-              // Get file size to track position
-              const stats = await fsPromises.stat(NANOS_LOG_PATH);
-              let lastPosition = stats.size;
-              
-              const pollInterval = setInterval(async () => {
-                try {
-                  // Get current file size
-                  const newStats = await fsPromises.stat(NANOS_LOG_PATH);
-                  
-                  // Only read if file has grown
-                  if (newStats.size > lastPosition) {
-                    // Read only the new content
-                    const fileHandle = await fsPromises.open(NANOS_LOG_PATH, 'r');
-                    const buffer = Buffer.alloc(newStats.size - lastPosition);
-                    
-                    await fileHandle.read(buffer, 0, buffer.length, lastPosition);
-                    await fileHandle.close();
-                    
-                    // Update last position
-                    lastPosition = newStats.size;
-                    
-                    // Convert buffer to string and split into lines
-                    const content = buffer.toString();
-                    if (content.trim()) {
-                      const lines = content.split('\n').filter(Boolean);
-                      if (lines.length > 0) {
-                        userSocket.emit('log_data', {
-                          type: 'update',
-                          logs: lines
-                        });
-                      }
-                    }
-                  }
-                } catch (pollError) {
-                  console.error('Error polling log file:', pollError);
-                }
-              }, 250);
-              
-              // Store interval reference for cleanup
-              logWatchers.set(userSocket.id, { 
-                watcher: { close: () => clearInterval(pollInterval) } as CustomWatcher, 
-                tail: null,
-                lastPosition
-              });
-              
-              if (callback) {
-                callback({
-                  success: true,
-                  message: 'Subscribed to log updates (polling mode)'
-                });
-              }
-            }
+          if (!tailProcess.stdout) {
+            throw new Error('Failed to create tail process stdout');
           }
-        } else {
-          // Non-realtime mode - use simpler polling approach
-          console.log('Using standard polling for socket', userSocket.id);
           
-          // Get file size to track position
-          const stats = await fsPromises.stat(NANOS_LOG_PATH);
-          let lastPosition = stats.size;
-          
-          const pollInterval = setInterval(async () => {
-            try {
-              // Get current file size
-              const newStats = await fsPromises.stat(NANOS_LOG_PATH);
+          // Process log lines one by one in real-time
+          let buffer = '';
+          tailProcess.stdout.on('data', (data) => {
+            // Append new data to buffer
+            buffer += data.toString();
+            
+            // Process complete lines
+            if (buffer.includes('\n')) {
+              const lines = buffer.split('\n');
+              // Keep the last incomplete line in the buffer
+              buffer = lines.pop() || '';
               
-              // Only read if file has grown
-              if (newStats.size > lastPosition) {
-                // Read only the new content
-                const fileHandle = await fsPromises.open(NANOS_LOG_PATH, 'r');
-                const buffer = Buffer.alloc(newStats.size - lastPosition);
-                
-                await fileHandle.read(buffer, 0, buffer.length, lastPosition);
-                await fileHandle.close();
-                
-                // Update last position
-                lastPosition = newStats.size;
-                
-                // Convert buffer to string and split into lines
-                const content = buffer.toString();
-                if (content.trim()) {
-                  const lines = content.split('\n').filter(Boolean);
-                  if (lines.length > 0) {
-                    userSocket.emit('log_data', {
-                      type: 'update',
-                      logs: lines
-                    });
-                  }
-                }
+              // Only emit if we have complete lines
+              if (lines.length > 0) {
+                userSocket.emit('log_data', {
+                  type: 'update',
+                  logs: lines
+                });
               }
-            } catch (pollError) {
-              console.error('Error polling log file:', pollError);
             }
-          }, 500);
+          });
           
-          // Store interval reference for cleanup
+          // Handle errors
+          tailProcess.on('error', (error) => {
+            console.error('Tail process error:', error);
+          });
+          
+          // Store references for cleanup
           logWatchers.set(userSocket.id, { 
-            watcher: { close: () => clearInterval(pollInterval) } as CustomWatcher, 
-            tail: null,
-            lastPosition
+            watcher: { 
+              close: () => {
+                tailProcess.kill();
+              } 
+            } as CustomWatcher, 
+            tail: tailProcess.stdout
           });
           
           if (callback) {
             callback({
               success: true,
-              message: 'Subscribed to log updates (standard mode)'
+              message: 'Subscribed to real-time log updates'
             });
+          }
+        } catch (error) {
+          console.error('Error setting up log streaming:', error);
+          
+          // If tail process fails, use Node.js readline interface with a file stream
+          // This is a fallback that's still efficient for real-time monitoring
+          try {
+            console.log('Falling back to file stream reading for socket', userSocket.id);
+            
+            const { createInterface } = require('node:readline');
+            
+            // Get current file size to start watching from the end
+            const stats = await fsPromises.stat(NANOS_LOG_PATH);
+            let lastPosition = stats.size;
+            
+            // Create a watcher to detect file changes
+            const watcher = watch(NANOS_LOG_PATH, { persistent: true });
+            
+            // Function to read new content when file changes
+            const readNewContent = async () => {
+              try {
+                const newStats = await fsPromises.stat(NANOS_LOG_PATH);
+                
+                // Only read if file has grown
+                if (newStats.size > lastPosition) {
+                  // Open file handle and read only new content
+                  const fileHandle = await fsPromises.open(NANOS_LOG_PATH, 'r');
+                  const buffer = Buffer.alloc(newStats.size - lastPosition);
+                  
+                  await fileHandle.read(buffer, 0, buffer.length, lastPosition);
+                  await fileHandle.close();
+                  
+                  // Update last position
+                  lastPosition = newStats.size;
+                  
+                  // Send new lines immediately
+                  const content = buffer.toString();
+                  if (content.trim()) {
+                    const lines = content.split('\n').filter(line => line.length > 0);
+                    if (lines.length > 0) {
+                      userSocket.emit('log_data', {
+                        type: 'update',
+                        logs: lines
+                      });
+                    }
+                  }
+                }
+              } catch (readError) {
+                console.error('Error reading file changes:', readError);
+              }
+            };
+            
+            // Watch for file changes
+            watcher.on('change', readNewContent);
+            
+            // Store watcher reference for cleanup
+            logWatchers.set(userSocket.id, { 
+              watcher, 
+              tail: null
+            });
+            
+            if (callback) {
+              callback({
+                success: true,
+                message: 'Subscribed to log updates (file watch mode)'
+              });
+            }
+          } catch (watchError) {
+            console.error('Error setting up file watcher:', watchError);
+            
+            if (callback) {
+              callback({
+                success: false,
+                message: `Could not setup log streaming: ${watchError instanceof Error ? watchError.message : 'Unknown error'}`
+              });
+            }
           }
         }
       } catch (error) {
