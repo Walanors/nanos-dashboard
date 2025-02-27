@@ -708,6 +708,8 @@ export function SocketProvider({ children }: { children: ReactNode }) {
         return;
       }
       
+      console.log('Sending server command:', command); // Debug log
+      
       const timeoutId = setTimeout(() => {
         reject(new Error('Server command request timed out'));
       }, 10000);
@@ -718,6 +720,8 @@ export function SocketProvider({ children }: { children: ReactNode }) {
         error?: string;
       }) => {
         clearTimeout(timeoutId);
+        
+        console.log('Server command response:', response); // Debug log
         
         if (response.success) {
           resolve({
@@ -759,19 +763,36 @@ export function SocketProvider({ children }: { children: ReactNode }) {
       }
       
       // Clean up any existing subscription first
-      unsubscribeFromLogs();
+      if (isSubscribedToLogs && socket) {
+        socket.off('log_data');
+        socket.emit('unsubscribe_logs');
+        setIsSubscribedToLogs(false);
+      }
       
       setIsLoadingLogs(true);
       
       // Set up event listener for log data
       socket.on('log_data', handleLogData);
       
-      // Subscribe to logs
-      socket.emit('subscribe_logs', options, (response: {
+      // Set a shorter timeout for more responsive feedback
+      const timeoutId = setTimeout(() => {
+        setIsLoadingLogs(false);
+        socket.off('log_data');
+        reject(new Error('Log subscription request timed out'));
+      }, 5000); // 5 seconds timeout instead of default
+      
+      // Subscribe to logs with real-time option if available
+      const subscribeOptions = {
+        ...options,
+        realtime: true // Request real-time updates if the server supports it
+      };
+      
+      socket.emit('subscribe_logs', subscribeOptions, (response: {
         success: boolean;
         message?: string;
         error?: string;
       }) => {
+        clearTimeout(timeoutId);
         setIsLoadingLogs(false);
         
         if (response.success) {
@@ -784,8 +805,9 @@ export function SocketProvider({ children }: { children: ReactNode }) {
         }
       });
     });
-  }, [socket, connectionState.connected, handleLogData]);
+  }, [socket, connectionState.connected, handleLogData, isSubscribedToLogs]);
   
+  // Restore the unsubscribeFromLogs function
   const unsubscribeFromLogs = useCallback(() => {
     if (socket) {
       socket.off('log_data');
@@ -793,12 +815,12 @@ export function SocketProvider({ children }: { children: ReactNode }) {
       setIsSubscribedToLogs(false);
     }
   }, [socket]);
-
+  
   // Effect to check server status when socket connects
   useEffect(() => {
     if (socket && connectionState.connected) {
       fetchServerStatus().catch(error => {
-        console.error('Error fetching initial server status:', error);
+        console.error('Error fetching server status:', error);
       });
     }
   }, [socket, connectionState.connected, fetchServerStatus]);

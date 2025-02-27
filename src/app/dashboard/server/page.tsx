@@ -104,8 +104,13 @@ export default function ServerPage() {
           
           // Execute command
           terminal.writeln('');
-          handleTerminalCommand(currentCommand);
+          const cmdToExecute = currentCommand;
           currentCommand = '';
+          
+          // Use setTimeout to ensure the UI updates before executing the command
+          setTimeout(() => {
+            handleTerminalCommand(cmdToExecute);
+          }, 0);
         } else {
           // Just add a new line for empty command
           terminal.writeln('');
@@ -178,17 +183,35 @@ export default function ServerPage() {
   
   // Handle terminal command execution
   const handleTerminalCommand = async (cmd: string) => {
-    if (!cmd.trim() || !serverStatus?.running) return;
+    if (!cmd.trim()) return;
     
     try {
+      console.log('Terminal command entered:', cmd); // Debug log
+      
       if (xtermRef.current) {
         xtermRef.current.writeln(`\x1b[90mExecuting: ${cmd}\x1b[0m`);
       }
       
-      await sendServerCommand(cmd);
+      // Check if server is running and warn if not
+      if (!serverStatus?.running) {
+        console.log('Cannot execute command - server not running'); // Debug log
+        if (xtermRef.current) {
+          xtermRef.current.writeln('\x1b[31mError: Server is not running\x1b[0m');
+          xtermRef.current.write('\x1b[33m$ \x1b[0m');
+        }
+        return;
+      }
+      
+      // Actually send the command to the server
+      console.log('Sending command to server:', cmd); // Debug log
+      const result = await sendServerCommand(cmd);
+      console.log('Command result:', result); // Debug log
       
       // Show prompt after command execution
       if (xtermRef.current) {
+        if (result?.message) {
+          xtermRef.current.writeln(`\x1b[32m${result.message}\x1b[0m`);
+        }
         xtermRef.current.write('\x1b[33m$ \x1b[0m');
       }
     } catch (error: unknown) {
@@ -207,11 +230,23 @@ export default function ServerPage() {
   // Subscribe to logs when component mounts
   useEffect(() => {
     if (!isSubscribedToLogs) {
-      subscribeToLogs({ initialLines: 100 })
+      // Subscribe with a smaller batch size for more frequent updates
+      subscribeToLogs({ initialLines: 50 })
+        .then(() => {
+          if (xtermRef.current) {
+            xtermRef.current.writeln('\x1b[32mConnected to server logs\x1b[0m');
+            xtermRef.current.write('\x1b[33m$ \x1b[0m');
+          }
+        })
         .catch((error: unknown) => {
           console.error('Failed to subscribe to logs:', error);
           const errorMessage = error instanceof Error ? error.message : 'An unknown error occurred';
           toast.error(`Error subscribing to logs: ${errorMessage}`);
+          
+          if (xtermRef.current) {
+            xtermRef.current.writeln(`\x1b[31mError connecting to logs: ${errorMessage}\x1b[0m`);
+            xtermRef.current.write('\x1b[33m$ \x1b[0m');
+          }
         });
     }
     
@@ -233,7 +268,6 @@ export default function ServerPage() {
       if (newLogs.length > 0) {
         // Save current line content
         const currentLine = xtermRef.current.buffer.active.getLine(xtermRef.current.buffer.active.cursorY)?.translateToString() || '';
-        const cursorX = xtermRef.current.buffer.active.cursorX;
         
         // Clear current line
         xtermRef.current.write('\x1b[2K\r');
@@ -458,7 +492,8 @@ export default function ServerPage() {
               className="px-3 py-1 bg-amber-500/20 text-amber-300 rounded-md hover:bg-amber-500/30 transition-colors font-mono text-xs flex items-center"
               onClick={() => {
                 unsubscribeFromLogs();
-                subscribeToLogs({ initialLines: 100 });
+                // Use a smaller batch size for more frequent updates
+                subscribeToLogs({ initialLines: 50 });
                 
                 if (xtermRef.current) {
                   xtermRef.current.writeln('\x1b[33mRefreshing logs...\x1b[0m');
