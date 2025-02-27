@@ -3,6 +3,7 @@
 import { useState, useEffect, useCallback } from 'react';
 import { useSocket } from '@/hooks/useSocket';
 import { NANOS_INSTALL_DIR } from './NanosOnboarding';
+// @ts-ignore - toml package doesn't have type declarations
 import toml from 'toml';
 import { toast } from 'react-hot-toast';
 
@@ -128,30 +129,20 @@ export default function ServerConfiguration() {
         }
       }
 
-      const result = await executeCommand(`cat "${NANOS_INSTALL_DIR}/Config.toml"`);
-      if (result.error) {
-        throw new Error(result.error);
-      }
-
-      // Get the raw output and clean it
-      const rawOutput = result.output;
-      console.log('Raw command output:', rawOutput);
-
-      // Clean the output by removing any potential shell prompts or command success messages
-      const configLines = rawOutput.split('\n');
-      const cleanedLines = configLines.filter(line => 
-        !line.includes('Command executed successfully') &&
-        !line.match(/^root@.*#/) && // Remove root shell prompts
-        line.trim() !== '' // Remove empty lines
-      );
-      
-      // Join lines and ensure proper line endings
-      const configContent = cleanedLines.join('\n').trim();
-      console.log('Cleaned config content:', configContent);
-
       try {
-        // Parse TOML content with explicit type casting
-        const rawParsedConfig = toml.parse(configContent) as TomlTable;
+        // Use the new TOML file reading endpoint instead of cat command
+        const response = await fetch(`/api/files/toml?path=${encodeURIComponent(`${NANOS_INSTALL_DIR}/Config.toml`)}`);
+        
+        if (!response.ok) {
+          const errorData = await response.json();
+          throw new Error(errorData.error || 'Failed to load configuration');
+        }
+        
+        const result = await response.json();
+        const rawParsedConfig = result.content as TomlTable;
+        
+        console.log('Raw parsed config from server:', rawParsedConfig);
+
         const parsedConfig: ParsedTomlConfig = {
           discover: rawParsedConfig.discover ? {
             name: String(rawParsedConfig.discover.name || ''),
@@ -192,6 +183,7 @@ export default function ServerConfiguration() {
             compression: Number(rawParsedConfig.optimization.compression || 0),
           } : undefined,
         };
+
         console.log('Raw parsed config:', parsedConfig);
 
         // Convert the parsed config to our expected format with defaults
@@ -347,74 +339,54 @@ export default function ServerConfiguration() {
     setIsSaving(true);
     setError(null);
     try {
-      // Format the configuration with comments and proper spacing
-      const configString = `# discover configurations
-[discover]
-    # server name
-    name = "${config.discover.name}"
-    # server description (max 127 characters)
-    description = "${config.discover.description}"
-    # server IP. we recommend leaving it 0.0.0.0 for default
-    ip = "${config.discover.ip}"
-    # server port (TCP and UDP)
-    port = ${config.discover.port}
-    # query port (UDP)
-    query_port = ${config.discover.query_port}
-    # announce server in the master server list
-    announce = ${config.discover.announce}
-    # true if should run as dedicated server or false to run as P2P
-    dedicated_server = ${config.discover.dedicated_server}
-
-# general configurations
-[general]
-    # max players
-    max_players = ${config.general.max_players}
-    # leave it blank for no password
-    password = "${config.general.password}"
-    # nanos world server authentication token
-    token = "${config.general.token}"
-    # banned nanos account IDs
-    banned_ids = ${JSON.stringify(config.general.banned_ids)}
-
-# game configurations
-[game]
-    # default startup map
-    map = "${config.game.map}"
-    # game-mode package to load
-    game_mode = "${config.game.game_mode}"
-    # packages list
-    packages = ${JSON.stringify(config.game.packages)}
-    # asset packs list
-    assets = ${JSON.stringify(config.game.assets)}
-    # loading-screen package to load
-    loading_screen = "${config.game.loading_screen}"
-
-# custom settings values
-[custom_settings]
-${Object.entries(config.custom_settings)
-  .map(([key, value]) => `    ${key} = ${JSON.stringify(value)}`)
-  .join('\n')}
-
-# debug configurations
-[debug]
-    # log Level - (1) normal, (2) debug or (3) verbose
-    log_level = ${config.debug.log_level}
-    # if to use async or sync logs
-    async_log = ${config.debug.async_log}
-    # enables performance profiling logs
-    profiling = ${config.debug.profiling}
-
-# optimization configurations
-[optimization]
-    # server tick rate in milliseconds
-    tick_rate = ${config.optimization.tick_rate}
-    # compression level (0-9)
-    compression = ${config.optimization.compression}`;
+      // Use the new TOML file saving endpoint instead of echo command
+      const response = await fetch('/api/files/toml', {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json',
+        },
+        body: JSON.stringify({
+          path: `${NANOS_INSTALL_DIR}/Config.toml`,
+          content: {
+            discover: {
+              name: config.discover.name,
+              description: config.discover.description,
+              ip: config.discover.ip,
+              port: config.discover.port,
+              query_port: config.discover.query_port,
+              announce: config.discover.announce,
+              dedicated_server: config.discover.dedicated_server,
+            },
+            general: {
+              max_players: config.general.max_players,
+              password: config.general.password,
+              token: config.general.token,
+              banned_ids: config.general.banned_ids,
+            },
+            game: {
+              map: config.game.map,
+              game_mode: config.game.game_mode,
+              packages: config.game.packages,
+              assets: config.game.assets,
+              loading_screen: config.game.loading_screen,
+            },
+            custom_settings: config.custom_settings,
+            debug: {
+              log_level: config.debug.log_level,
+              async_log: config.debug.async_log,
+              profiling: config.debug.profiling,
+            },
+            optimization: {
+              tick_rate: config.optimization.tick_rate,
+              compression: config.optimization.compression,
+            }
+          }
+        }),
+      });
       
-      // Save the file
-      const result = await executeCommand(`echo '${configString}' > ${NANOS_INSTALL_DIR}/Config.toml`);
-      if (result.error) {
-        throw new Error(result.error);
+      if (!response.ok) {
+        const errorData = await response.json();
+        throw new Error(errorData.error || 'Failed to save configuration');
       }
       
       toast.success('Configuration saved successfully');
