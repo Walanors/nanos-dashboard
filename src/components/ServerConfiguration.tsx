@@ -5,7 +5,7 @@ import { useSocket } from '@/hooks/useSocket';
 import { NANOS_INSTALL_DIR } from './NanosOnboarding';
 import { toast } from 'react-hot-toast';
 import Select from 'react-select';
-import type { MultiValue, StylesConfig } from 'react-select';
+import type { MultiValue, StylesConfig, SingleValue, ActionMeta } from 'react-select';
 
 // Define types for file listing
 interface FileEntry {
@@ -23,7 +23,7 @@ interface SelectOption {
 }
 
 // Define the custom styles for React Select to match our design
-const selectStyles: StylesConfig<SelectOption, true> = {
+const selectStyles: StylesConfig<SelectOption, boolean> = {
   control: (styles) => ({
     ...styles,
     backgroundColor: 'rgba(0, 0, 0, 0.3)',
@@ -237,6 +237,16 @@ type ParsedTomlConfig = {
     : ServerConfig[K];
 };
 
+// Add interface for package metadata from Package.toml
+interface PackageInfo {
+  name: string;
+  path: string;
+  type: 'script' | 'game-mode' | 'map' | 'loading-screen' | 'c-module' | 'unknown';
+  title?: string;
+  author?: string;
+  version?: string;
+}
+
 export default function ServerConfiguration() {
   const { executeCommand, isConnected } = useSocket();
   const [config, setConfig] = useState<ServerConfig | null>(null);
@@ -246,9 +256,11 @@ export default function ServerConfiguration() {
   
   // Add states for package and asset listings
   const [availablePackages, setAvailablePackages] = useState<FileEntry[]>([]);
+  const [packageInfo, setPackageInfo] = useState<PackageInfo[]>([]);
   const [availableAssets, setAvailableAssets] = useState<FileEntry[]>([]);
   const [isLoadingPackages, setIsLoadingPackages] = useState(false);
   const [isLoadingAssets, setIsLoadingAssets] = useState(false);
+  const [isLoadingPackageInfo, setIsLoadingPackageInfo] = useState(false);
   
   // Check credentials on component mount
   useEffect(() => {
@@ -302,10 +314,14 @@ export default function ServerConfiguration() {
       const data = await response.json() as { success: boolean, files: FileEntry[] };
       
       if (data.success) {
+        const directories = data.files.filter(file => file.isDirectory);
+        
         if (isPackages) {
-          setAvailablePackages(data.files.filter(file => file.isDirectory));
+          setAvailablePackages(directories);
+          // After loading package directories, load their Package.toml files
+          await loadPackageInfo(directories);
         } else {
-          setAvailableAssets(data.files.filter(file => file.isDirectory));
+          setAvailableAssets(directories);
         }
       } else {
         throw new Error(`Failed to load ${type} directory contents`);
@@ -322,6 +338,80 @@ export default function ServerConfiguration() {
     }
   }, []);
 
+  // New function to load Package.toml files and determine package types
+  const loadPackageInfo = useCallback(async (packages: FileEntry[]) => {
+    setIsLoadingPackageInfo(true);
+    const packageInfoList: PackageInfo[] = [];
+    
+    try {
+      // Process packages in batches to avoid too many simultaneous requests
+      const batchSize = 5;
+      for (let i = 0; i < packages.length; i += batchSize) {
+        const batch = packages.slice(i, i + batchSize);
+        const batchPromises = batch.map(async (pkg) => {
+          try {
+            const tomlPath = `${pkg.path}/Package.toml`;
+            const response = await fetch(`/api/files/toml?path=${encodeURIComponent(tomlPath)}`, {
+              headers: {
+                ...getAuthHeader(),
+              },
+            });
+            
+            if (!response.ok) {
+              // If Package.toml doesn't exist or can't be read, assume it's a script package
+              return {
+                name: pkg.name,
+                path: pkg.path,
+                type: 'unknown' as const
+              };
+            }
+            
+            const result = await response.json();
+            const content = result.content as Record<string, unknown>;
+            
+            // Determine package type based on which section is present in the TOML
+            let packageType: PackageInfo['type'] = 'unknown';
+            if (content.script) packageType = 'script';
+            else if (content.game_mode) packageType = 'game-mode';
+            else if (content.map) packageType = 'map';
+            else if (content.loading_screen) packageType = 'loading-screen';
+            else if (content.c_module) packageType = 'c-module';
+            
+            // Handle the metadata safely using optional chaining and type assertions
+            const meta = content.meta as Record<string, string> | undefined;
+            
+            return {
+              name: pkg.name,
+              path: pkg.path,
+              type: packageType,
+              title: meta?.title,
+              author: meta?.author,
+              version: meta?.version
+            };
+          } catch (error) {
+            console.error(`Error loading Package.toml for ${pkg.name}:`, error);
+            return {
+              name: pkg.name,
+              path: pkg.path,
+              type: 'unknown' as const
+            };
+          }
+        });
+        
+        const batchResults = await Promise.all(batchPromises);
+        packageInfoList.push(...batchResults);
+      }
+      
+      setPackageInfo(packageInfoList);
+      console.log('Package info loaded:', packageInfoList);
+    } catch (error) {
+      console.error('Error loading package info:', error);
+      toast.error('Failed to load package information');
+    } finally {
+      setIsLoadingPackageInfo(false);
+    }
+  }, []);
+
   // Load packages and assets when component mounts
   useEffect(() => {
     if (config) {
@@ -330,13 +420,42 @@ export default function ServerConfiguration() {
     }
   }, [config, loadDirectoryContents]);
 
-  // Convert file entries to select options
-  const getPackageOptions = useCallback((): SelectOption[] => {
-    return availablePackages.map(pkg => ({
+  // Convert file entries to select options - modified to filter by package type
+  const getScriptPackageOptions = useCallback((): SelectOption[] => {
+    // Filter for script packages only
+    const scriptPackages = packageInfo.filter(pkg => pkg.type === 'script' || pkg.type === 'unknown');
+    return scriptPackages.map(pkg => ({
       value: pkg.name,
-      label: pkg.name
+      label: pkg.title ? `${pkg.name} (${pkg.title})` : pkg.name
     }));
-  }, [availablePackages]);
+  }, [packageInfo]);
+
+  const getGameModeOptions = useCallback((): SelectOption[] => {
+    // Filter for game-mode packages only
+    const gameModePackages = packageInfo.filter(pkg => pkg.type === 'game-mode');
+    return gameModePackages.map(pkg => ({
+      value: pkg.name,
+      label: pkg.title ? `${pkg.name} (${pkg.title})` : pkg.name
+    }));
+  }, [packageInfo]);
+
+  const getMapOptions = useCallback((): SelectOption[] => {
+    // Filter for map packages only
+    const mapPackages = packageInfo.filter(pkg => pkg.type === 'map');
+    return mapPackages.map(pkg => ({
+      value: pkg.name,
+      label: pkg.title ? `${pkg.name} (${pkg.title})` : pkg.name
+    }));
+  }, [packageInfo]);
+
+  const getLoadingScreenOptions = useCallback((): SelectOption[] => {
+    // Filter for loading-screen packages only
+    const loadingScreenPackages = packageInfo.filter(pkg => pkg.type === 'loading-screen');
+    return loadingScreenPackages.map(pkg => ({
+      value: pkg.name,
+      label: pkg.title ? `${pkg.name} (${pkg.title})` : pkg.name
+    }));
+  }, [packageInfo]);
 
   const getAssetOptions = useCallback((): SelectOption[] => {
     return availableAssets.map(asset => ({
@@ -398,6 +517,110 @@ export default function ServerConfiguration() {
     
     toast.success('Asset list updated');
   };
+
+  // Handle select change for game-mode, map, and loading-screen
+  const handleGameModeChange = (newValue: SingleValue<SelectOption>, actionMeta: ActionMeta<SelectOption>) => {
+    if (!config) return;
+    
+    setConfig(prev => {
+      if (!prev) return prev;
+      return {
+        ...prev,
+        game: {
+          ...prev.game,
+          game_mode: newValue ? newValue.value : ''
+        }
+      };
+    });
+    
+    toast.success('Game mode updated');
+  };
+
+  const handleMapChange = (newValue: SingleValue<SelectOption>, actionMeta: ActionMeta<SelectOption>) => {
+    if (!config) return;
+    
+    setConfig(prev => {
+      if (!prev) return prev;
+      return {
+        ...prev,
+        game: {
+          ...prev.game,
+          map: newValue ? newValue.value : 'default-blank-map'
+        }
+      };
+    });
+    
+    toast.success('Map updated');
+  };
+
+  const handleLoadingScreenChange = (newValue: SingleValue<SelectOption>, actionMeta: ActionMeta<SelectOption>) => {
+    if (!config) return;
+    
+    setConfig(prev => {
+      if (!prev) return prev;
+      return {
+        ...prev,
+        game: {
+          ...prev.game,
+          loading_screen: newValue ? newValue.value : ''
+        }
+      };
+    });
+    
+    toast.success('Loading screen updated');
+  };
+
+  // Get current values for selects
+  const getCurrentGameModeOption = useCallback((): SelectOption | null => {
+    if (!config || !config.game.game_mode) return null;
+    
+    const gameMode = packageInfo.find(pkg => pkg.name === config.game.game_mode);
+    if (gameMode) {
+      return {
+        value: gameMode.name,
+        label: gameMode.title ? `${gameMode.name} (${gameMode.title})` : gameMode.name
+      };
+    }
+    
+    return {
+      value: config.game.game_mode,
+      label: config.game.game_mode
+    };
+  }, [config, packageInfo]);
+
+  const getCurrentMapOption = useCallback((): SelectOption | null => {
+    if (!config) return null;
+    
+    const map = packageInfo.find(pkg => pkg.name === config.game.map);
+    if (map) {
+      return {
+        value: map.name,
+        label: map.title ? `${map.name} (${map.title})` : map.name
+      };
+    }
+    
+    return {
+      value: config.game.map,
+      label: config.game.map
+    };
+  }, [config, packageInfo]);
+
+  const getCurrentLoadingScreenOption = useCallback((): SelectOption | null => {
+    if (!config || !config.game.loading_screen) return null;
+    
+    const loadingScreen = packageInfo.find(pkg => pkg.name === config.game.loading_screen);
+    if (loadingScreen) {
+      return {
+        value: loadingScreen.name,
+        label: loadingScreen.title ? `${loadingScreen.name} (${loadingScreen.title})` : loadingScreen.name
+      };
+    }
+    
+    return {
+      value: config.game.loading_screen,
+      label: config.game.loading_screen
+    };
+  }, [config, packageInfo]);
 
   // Load configuration from file
   const loadConfig = useCallback(async () => {
@@ -785,6 +1008,82 @@ export default function ServerConfiguration() {
     );
   }
 
+  // Styled specifically for single-select components
+  const mapSelect = (
+    <Select
+      inputId="game-map"
+      value={getCurrentMapOption()}
+      onChange={(newValue: SingleValue<SelectOption>) => handleMapChange(newValue, {} as ActionMeta<SelectOption>)}
+      options={getMapOptions()}
+      isMulti={false}
+      styles={selectStyles}
+      placeholder="Select a map..."
+      noOptionsMessage={() => 
+        isLoadingPackageInfo
+          ? "Loading maps..."
+          : "No maps found"
+      }
+      className="react-select-container"
+      classNamePrefix="react-select"
+      isSearchable={true}
+      menuPortalTarget={typeof document !== 'undefined' ? document.body : null}
+      menuPosition="fixed"
+      isClearable={true}
+      isLoading={isLoadingPackageInfo}
+      loadingMessage={() => "Loading maps..."}
+    />
+  );
+
+  const gameModeSelect = (
+    <Select
+      inputId="game-mode"
+      value={getCurrentGameModeOption()}
+      onChange={(newValue: SingleValue<SelectOption>) => handleGameModeChange(newValue, {} as ActionMeta<SelectOption>)}
+      options={getGameModeOptions()}
+      isMulti={false}
+      styles={selectStyles}
+      placeholder="Select a game mode..."
+      noOptionsMessage={() => 
+        isLoadingPackageInfo
+          ? "Loading game modes..."
+          : "No game modes found"
+      }
+      className="react-select-container"
+      classNamePrefix="react-select"
+      isSearchable={true}
+      menuPortalTarget={typeof document !== 'undefined' ? document.body : null}
+      menuPosition="fixed"
+      isClearable={true}
+      isLoading={isLoadingPackageInfo}
+      loadingMessage={() => "Loading game modes..."}
+    />
+  );
+
+  const loadingScreenSelect = (
+    <Select
+      inputId="loading-screen"
+      value={getCurrentLoadingScreenOption()}
+      onChange={(newValue: SingleValue<SelectOption>) => handleLoadingScreenChange(newValue, {} as ActionMeta<SelectOption>)}
+      options={getLoadingScreenOptions()}
+      isMulti={false}
+      styles={selectStyles}
+      placeholder="Select a loading screen..."
+      noOptionsMessage={() => 
+        isLoadingPackageInfo
+          ? "Loading loading screens..."
+          : "No loading screens found"
+      }
+      className="react-select-container"
+      classNamePrefix="react-select"
+      isSearchable={true}
+      menuPortalTarget={typeof document !== 'undefined' ? document.body : null}
+      menuPosition="fixed"
+      isClearable={true}
+      isLoading={isLoadingPackageInfo}
+      loadingMessage={() => "Loading loading screens..."}
+    />
+  );
+
   return (
     <div className="p-6 space-y-6">
       <div className="flex justify-between items-center">
@@ -877,31 +1176,118 @@ export default function ServerConfiguration() {
       <section className="space-y-4">
         <h3 className="text-lg font-mono text-amber-400">Game Settings</h3>
         <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+          {/* Map selection - Now using Select component */}
           <div className="space-y-2">
             <label htmlFor="game-map" className="block text-sm font-mono text-gray-300">Map</label>
-            <input
-              id="game-map"
-              type="text"
-              value={config?.game.map || ''}
-              onChange={(e) => handleChange('game', 'map', e.target.value)}
-              className="w-full bg-black/30 border border-amber-500/20 rounded px-3 py-2 text-gray-300 focus:outline-none focus:border-amber-500/50"
-            />
+            <div className="flex items-center">
+              <div className="flex-grow">
+                {mapSelect}
+              </div>
+              <button
+                type="button"
+                onClick={() => loadDirectoryContents('packages')}
+                disabled={isLoadingPackages}
+                className="ml-2 px-3 py-2 bg-amber-500/20 text-amber-300 rounded hover:bg-amber-500/30 transition-colors disabled:opacity-50 font-mono text-xs flex items-center"
+                aria-label="Refresh maps list"
+              >
+                {isLoadingPackages ? 
+                  <span className="flex items-center">
+                    <svg className="animate-spin -ml-1 mr-2 h-4 w-4 text-amber-300" xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24" aria-hidden="true">
+                      <circle className="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" strokeWidth="4" />
+                      <path className="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8V0C5.373 0 0 5.373 0 12h4zm2 5.291A7.962 7.962 0 014 12H0c0 3.042 1.135 5.824 3 7.938l3-2.647z" />
+                    </svg>
+                    <span>Loading</span>
+                  </span> : 
+                  <span className="flex items-center">
+                    <svg xmlns="http://www.w3.org/2000/svg" className="h-4 w-4 mr-1" fill="none" viewBox="0 0 24 24" stroke="currentColor" aria-hidden="true">
+                      <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M4 4v5h.582m15.356 2A8.001 8.001 0 004.582 9m0 0H9m11 11v-5h-.581m0 0a8.003 8.003 0 01-15.357-2m15.357 2H15" />
+                    </svg>
+                    <span>Refresh</span>
+                  </span>
+                }
+              </button>
+            </div>
+            <p className="text-xs text-amber-500/50 italic">
+              Select a map package to use for this server
+            </p>
           </div>
+          
+          {/* Game Mode selection - Now using Select component */}
           <div className="space-y-2">
             <label htmlFor="game-mode" className="block text-sm font-mono text-gray-300">Game Mode</label>
-            <input
-              id="game-mode"
-              type="text"
-              value={config?.game.game_mode || ''}
-              onChange={(e) => handleChange('game', 'game_mode', e.target.value)}
-              className="w-full bg-black/30 border border-amber-500/20 rounded px-3 py-2 text-gray-300 focus:outline-none focus:border-amber-500/50"
-            />
+            <div className="flex items-center">
+              <div className="flex-grow">
+                {gameModeSelect}
+              </div>
+              <button
+                type="button"
+                onClick={() => loadDirectoryContents('packages')}
+                disabled={isLoadingPackages}
+                className="ml-2 px-3 py-2 bg-amber-500/20 text-amber-300 rounded hover:bg-amber-500/30 transition-colors disabled:opacity-50 font-mono text-xs flex items-center"
+                aria-label="Refresh game modes list"
+              >
+                {isLoadingPackages ? 
+                  <span className="flex items-center">
+                    <svg className="animate-spin -ml-1 mr-2 h-4 w-4 text-amber-300" xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24" aria-hidden="true">
+                      <circle className="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" strokeWidth="4" />
+                      <path className="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8V0C5.373 0 0 5.373 0 12h4zm2 5.291A7.962 7.962 0 014 12H0c0 3.042 1.135 5.824 3 7.938l3-2.647z" />
+                    </svg>
+                    <span>Loading</span>
+                  </span> : 
+                  <span className="flex items-center">
+                    <svg xmlns="http://www.w3.org/2000/svg" className="h-4 w-4 mr-1" fill="none" viewBox="0 0 24 24" stroke="currentColor" aria-hidden="true">
+                      <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M4 4v5h.582m15.356 2A8.001 8.001 0 004.582 9m0 0H9m11 11v-5h-.581m0 0a8.003 8.003 0 01-15.357-2m15.357 2H15" />
+                    </svg>
+                    <span>Refresh</span>
+                  </span>
+                }
+              </button>
+            </div>
+            <p className="text-xs text-amber-500/50 italic">
+              Only one game mode can be loaded at a time
+            </p>
+          </div>
+          
+          {/* Loading Screen selection */}
+          <div className="space-y-2">
+            <label htmlFor="loading-screen" className="block text-sm font-mono text-gray-300">Loading Screen</label>
+            <div className="flex items-center">
+              <div className="flex-grow">
+                {loadingScreenSelect}
+              </div>
+              <button
+                type="button"
+                onClick={() => loadDirectoryContents('packages')}
+                disabled={isLoadingPackages}
+                className="ml-2 px-3 py-2 bg-amber-500/20 text-amber-300 rounded hover:bg-amber-500/30 transition-colors disabled:opacity-50 font-mono text-xs flex items-center"
+                aria-label="Refresh loading screens list"
+              >
+                {isLoadingPackages ? 
+                  <span className="flex items-center">
+                    <svg className="animate-spin -ml-1 mr-2 h-4 w-4 text-amber-300" xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24" aria-hidden="true">
+                      <circle className="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" strokeWidth="4" />
+                      <path className="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8V0C5.373 0 0 5.373 0 12h4zm2 5.291A7.962 7.962 0 014 12H0c0 3.042 1.135 5.824 3 7.938l3-2.647z" />
+                    </svg>
+                    <span>Loading</span>
+                  </span> : 
+                  <span className="flex items-center">
+                    <svg xmlns="http://www.w3.org/2000/svg" className="h-4 w-4 mr-1" fill="none" viewBox="0 0 24 24" stroke="currentColor" aria-hidden="true">
+                      <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M4 4v5h.582m15.356 2A8.001 8.001 0 004.582 9m0 0H9m11 11v-5h-.581m0 0a8.003 8.003 0 01-15.357-2m15.357 2H15" />
+                    </svg>
+                    <span>Refresh</span>
+                  </span>
+                }
+              </button>
+            </div>
+            <p className="text-xs text-amber-500/50 italic">
+              Select a loading screen package for players joining your server
+            </p>
           </div>
         </div>
 
-        {/* Packages Section */}
+        {/* Script Packages Section */}
         <div className="mt-4">
-          <label htmlFor="package-select" className="block text-sm font-mono text-gray-300 mb-2">Packages</label>
+          <label htmlFor="package-select" className="block text-sm font-mono text-gray-300 mb-2">Script Packages</label>
           
           {/* Package Selection */}
           <div className="flex flex-col space-y-2">
@@ -911,16 +1297,16 @@ export default function ServerConfiguration() {
                   inputId="package-select"
                   value={getSelectedPackageOptions()}
                   onChange={handlePackagesChange}
-                  options={getPackageOptions()}
+                  options={getScriptPackageOptions()}
                   isMulti={true}
                   styles={selectStyles}
-                  placeholder="Select packages..."
+                  placeholder="Select script packages..."
                   noOptionsMessage={({ inputValue }) => 
                     inputValue 
-                      ? `No packages matching "${inputValue}"` 
-                      : isLoadingPackages 
+                      ? `No script packages matching "${inputValue}"` 
+                      : isLoadingPackageInfo 
                         ? "Loading packages..." 
-                        : "No packages found"
+                        : "No script packages found"
                   }
                   className="react-select-container"
                   classNamePrefix="react-select"
@@ -928,7 +1314,7 @@ export default function ServerConfiguration() {
                   menuPortalTarget={typeof document !== 'undefined' ? document.body : null}
                   menuPosition="fixed"
                   isClearable={true}
-                  isLoading={isLoadingPackages}
+                  isLoading={isLoadingPackageInfo || isLoadingPackages}
                   loadingMessage={() => "Loading packages..."}
                   filterOption={(option, inputValue) => 
                     option.label.toLowerCase().includes(inputValue.toLowerCase())
@@ -962,7 +1348,7 @@ export default function ServerConfiguration() {
             
             {/* Help text */}
             <p className="text-xs text-amber-500/50 italic">
-              Select multiple packages from the dropdown or search by typing
+              Select multiple script packages to load
             </p>
           </div>
         </div>
@@ -1030,7 +1416,7 @@ export default function ServerConfiguration() {
             
             {/* Help text */}
             <p className="text-xs text-amber-500/50 italic">
-              Select multiple assets from the dropdown or search by typing
+              Select multiple asset packs to load
             </p>
           </div>
         </div>
