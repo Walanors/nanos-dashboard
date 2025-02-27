@@ -6,8 +6,8 @@ import Providers from "@/components/Providers";
 const inter = Inter({ subsets: ["latin"] });
 
 export const metadata: Metadata = {
-  title: "Nanos World Server Manager",
-  description: "A modern dashboard for managing your Nanos World server",
+  title: "server dashboard - nanos_manager",
+  description: "A modern dashboard for managing your nanos world game server",
 };
 
 export default function RootLayout({

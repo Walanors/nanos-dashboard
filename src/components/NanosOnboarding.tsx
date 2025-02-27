@@ -1,6 +1,6 @@
 'use client';
 
-import { useState, useEffect, useCallback } from 'react';
+import { useState, useEffect, useCallback, useRef } from 'react';
 import { useUser } from '@/hooks/useUser';
 import { useSocket } from '@/hooks/useSocket';
 
@@ -106,8 +106,10 @@ export default function NanosOnboarding() {
   const [currentStep, setCurrentStep] = useState<OnboardingStep>(OnboardingStep.WELCOME);
   const [selectedVersion, setSelectedVersion] = useState<string>(NANOS_VERSIONS[0].id);
   const [installationProgress, setInstallationProgress] = useState<number>(0);
+  const [displayProgress, setDisplayProgress] = useState<number>(0);
   const [installationLog, setInstallationLog] = useState<string[]>([]);
   const [isInstalling, setIsInstalling] = useState<boolean>(false);
+  const progressIntervalRef = useRef<NodeJS.Timeout | null>(null);
   
   // Function to add log message
   const addLogMessage = useCallback((message: string) => {
@@ -135,56 +137,85 @@ export default function NanosOnboarding() {
     setSelectedVersion(versionId);
   };
   
+  // Setup progress interpolation
+  useEffect(() => {
+    if (isInstalling) {
+      // Create interval for interpolation
+      if (progressIntervalRef.current) {
+        clearInterval(progressIntervalRef.current);
+      }
+      
+      progressIntervalRef.current = setInterval(() => {
+        setDisplayProgress(prevDisplay => {
+          // If display is close to target, don't interpolate further
+          if (Math.abs(prevDisplay - installationProgress) < 0.2) {
+            return installationProgress;
+          }
+          
+          // Interpolate towards target
+          return prevDisplay + (installationProgress - prevDisplay) * 0.05;
+        });
+      }, 50);
+    } else if (progressIntervalRef.current) {
+      clearInterval(progressIntervalRef.current);
+    }
+    
+    return () => {
+      if (progressIntervalRef.current) {
+        clearInterval(progressIntervalRef.current);
+      }
+    };
+  }, [isInstalling, installationProgress]);
+  
   // Function to start installation
   const handleStartInstallation = async () => {
     setIsInstalling(true);
-    addLogMessage('> Starting Nanos World Server installation...');
-    addLogMessage(`> Selected version: ${NANOS_VERSIONS.find(v => v.id === selectedVersion)?.name}`);
+    addLogMessage('> Buckle up! We\'re about to launch your Nanos adventure! 🚀');
+    addLogMessage(`> You chose the ${NANOS_VERSIONS.find(v => v.id === selectedVersion)?.name} flavor. Nice taste!`);
     
     try {
       setInstallationProgress(10);
-      addLogMessage('> Installing lib32gcc-s1...');
+      addLogMessage('> Installing some nerdy dependencies... 🤓');
       const installLib32 = await executeCommand('sudo apt-get install -y lib32gcc-s1 unzip');
       if (installLib32.error) {
-        addLogMessage(`Error: ${installLib32.error}`);
+        addLogMessage(`Oops! Something went wrong: ${installLib32.error}`);
         throw new Error(installLib32.error);
       }
-      addLogMessage(installLib32.output);
+      addLogMessage('> Dependencies acquired! Moving on to greater things!');
 
       setInstallationProgress(30);
-      addLogMessage('> Creating installation directory...');
+      addLogMessage('> Creating a cozy home for your server... 🏠');
       const createDir = await executeCommand(`sudo mkdir -p ${NANOS_INSTALL_DIR}/steam`);
       if (createDir.error) {
-        addLogMessage(`Error: ${createDir.error}`);
+        addLogMessage(`Hmm, we couldn't build that home: ${createDir.error}`);
         throw new Error(createDir.error);
       }
-      addLogMessage(createDir.output);
-
+      
       const setPerms = await executeCommand(`sudo chown -R $USER:$USER ${NANOS_INSTALL_DIR}`);
       if (setPerms.error) {
-        addLogMessage(`Error: ${setPerms.error}`);
+        addLogMessage(`Permission denied! Even sudo couldn't help us: ${setPerms.error}`);
         throw new Error(setPerms.error);
       }
-      addLogMessage(setPerms.output);
+      addLogMessage('> Home sweet home created successfully!');
 
       setInstallationProgress(50);
-      addLogMessage('> Changing to installation directory...');
+      addLogMessage('> Teleporting to the installation directory... 🧙‍♂️');
       const cdCommand = await executeCommand(`cd ${NANOS_INSTALL_DIR}/steam`);
       if (cdCommand.error) {
-        addLogMessage(`Error: ${cdCommand.error}`);
+        addLogMessage(`Teleportation failed: ${cdCommand.error}`);
         throw new Error(cdCommand.error);
       }
 
-      addLogMessage('> Downloading and extracting SteamCMD...');
+      addLogMessage('> Summoning the almighty SteamCMD from the internet... 🧩');
       const downloadSteam = await executeCommand('curl -sqL "https://steamcdn-a.akamaihd.net/client/installer/steamcmd_linux.tar.gz" | tar zxvf -');
       if (downloadSteam.error) {
-        addLogMessage(`Error: ${downloadSteam.error}`);
+        addLogMessage(`Steam summoning ritual failed: ${downloadSteam.error}`);
         throw new Error(downloadSteam.error);
       }
-      addLogMessage(downloadSteam.output);
+      addLogMessage('> SteamCMD has answered our call!');
 
       setInstallationProgress(70);
-      addLogMessage('> Starting SteamCMD download (this may take a while)...');
+      addLogMessage('> Now for the fun part: downloading gigabytes of data! ☕ Time for a coffee break...');
       
       // Determine the install command based on selected version
       const steamInstallCmd = selectedVersion === 'bleeding-edge' 
@@ -193,37 +224,44 @@ export default function NanosOnboarding() {
       
       const installServer = await executeCommand(steamInstallCmd);
       if (installServer.error) {
-        addLogMessage(`Error during server installation: ${installServer.error}`);
+        addLogMessage(`Steam has betrayed us: ${installServer.error}`);
         throw new Error(installServer.error);
       }
-      addLogMessage(installServer.output);
+      addLogMessage('> Download complete! Hope you enjoyed your coffee! ☕');
 
       setInstallationProgress(85);
-      addLogMessage('> Creating default configuration file...');
+      addLogMessage('> Writing a beautiful config file filled with possibilities... ✨');
       // Create Config.toml with default configuration
       const createConfig = await executeCommand(`echo '${DEFAULT_SERVER_CONFIG}' > ${NANOS_INSTALL_DIR}/Config.toml`);
       if (createConfig.error) {
-        addLogMessage(`Error creating configuration file: ${createConfig.error}`);
+        addLogMessage(`Couldn't write the config. My creative writing skills failed me: ${createConfig.error}`);
         throw new Error(createConfig.error);
       }
-      addLogMessage('> Configuration file created successfully');
+      addLogMessage('> Config masterpiece created! Shakespeare would be proud!');
 
       setInstallationProgress(90);
-      addLogMessage('> Setting up permissions...');
+      addLogMessage('> Granting magical execution powers to your server... 🧙‍♂️');
       const makeExecutable = await executeCommand(`chmod +x ${NANOS_INSTALL_DIR}/NanosWorldServer.sh`);
       if (makeExecutable.error) {
-        addLogMessage(`Error: ${makeExecutable.error}`);
+        addLogMessage(`Failed to sprinkle the execution magic: ${makeExecutable.error}`);
         throw new Error(makeExecutable.error);
       }
-      addLogMessage(makeExecutable.output);
+      addLogMessage('> Magic powers granted!');
 
       setInstallationProgress(100);
-      addLogMessage('> Installation complete!');
-      addLogMessage(`> Server installed at: ${NANOS_INSTALL_DIR}`);
-      addLogMessage('> You can now proceed with server configuration.');
+      addLogMessage('> 🎉 Ta-da! Your server is ready to rock and roll! 🎸');
+      addLogMessage(`> Your new baby is resting at: ${NANOS_INSTALL_DIR}`);
+      addLogMessage('> Go forth and create amazing worlds! The Nanos universe awaits!');
+      
+      // Automatically mark onboarding as complete
+      await updateOnboardingStatus(true);
+      
+      // Advance to completion step automatically
+      setCurrentStep(OnboardingStep.COMPLETE);
       
     } catch (error) {
-      addLogMessage(`> Error: ${(error as Error).message}`);
+      addLogMessage(`> Oh no! We hit a bump in the road: ${(error as Error).message}`);
+      addLogMessage('> Don\'t worry, not all heroes succeed on their first quest!');
       // Keep progress where it failed
     } finally {
       setIsInstalling(false);
@@ -238,7 +276,6 @@ export default function NanosOnboarding() {
   
   // Function to complete onboarding
   const handleCompleteOnboarding = async () => {
-    await updateOnboardingStatus(true);
     // Navigate to dashboard or reload page
     window.location.reload();
   };
@@ -282,8 +319,8 @@ export default function NanosOnboarding() {
                   onClick={() => handleVersionSelect(version.id)}
                   className={`w-full p-4 rounded-lg cursor-pointer transition-all text-left ${
                     selectedVersion === version.id
-                      ? 'bg-amber-500/30 border border-amber-500/50'
-                      : 'bg-black/30 border border-amber-500/10 hover:bg-black/40'
+                      ? 'bg-amber-500/20 border border-amber-500/50'
+                      : 'hover:bg-black/30 border border-amber-500/10'
                   }`}
                 >
                   <div className="flex items-center">
@@ -323,8 +360,8 @@ export default function NanosOnboarding() {
           <div className="space-y-4">
             <h3 className="text-xl font-semibold text-amber-300 font-mono">Installing Nanos World Server</h3>
             
-            <div className="bg-black/50 p-4 rounded-lg border border-amber-500/10 font-mono text-sm">
-              <div className="h-64 overflow-y-auto space-y-1 mb-4">
+            <div className="font-mono text-sm">
+              <div className="h-64 overflow-y-auto space-y-1 mb-4 bg-black/20 p-3 rounded">
                 {installationLog.map((log, index) => (
                   <div key={`log-${index}-${log.slice(0, 10)}`} className="text-gray-300">{log}</div>
                 ))}
@@ -333,14 +370,14 @@ export default function NanosOnboarding() {
                 )}
               </div>
               
-              <div className="w-full bg-gray-800 rounded-full h-2.5">
+              <div className="w-full bg-gray-800/50 rounded-full h-2.5">
                 <div 
-                  className="bg-amber-500 h-2.5 rounded-full transition-all duration-300" 
-                  style={{ width: `${installationProgress}%` }}
+                  className="bg-amber-500 h-2.5 rounded-full transition-all duration-100" 
+                  style={{ width: `${displayProgress}%` }}
                 />
               </div>
               <div className="text-right text-xs text-gray-400 mt-1">
-                {installationProgress}% Complete
+                {Math.round(displayProgress)}% Complete
               </div>
             </div>
             
@@ -384,7 +421,7 @@ export default function NanosOnboarding() {
               You can now start managing your server from the dashboard.
             </p>
             
-            <div className="p-4 bg-green-900/20 border border-green-500/20 rounded-lg mt-4">
+            <div className="p-4 bg-green-900/20 rounded-lg mt-4">
               <h4 className="font-mono text-green-400 flex items-center">
                 <svg 
                   xmlns="http://www.w3.org/2000/svg" 
@@ -405,20 +442,13 @@ export default function NanosOnboarding() {
               </ul>
             </div>
             
-            <div className="flex justify-between mt-6">
-              <button
-                type="button"
-                onClick={handlePrevStep}
-                className="px-4 py-2 bg-gray-800/50 text-gray-300 rounded hover:bg-gray-800/70 transition-colors font-mono"
-              >
-                &lt; Back
-              </button>
+            <div className="flex justify-center mt-6">
               <button
                 type="button"
                 onClick={handleCompleteOnboarding}
-                className="px-4 py-2 bg-green-600/50 text-green-300 rounded hover:bg-green-600/70 transition-colors font-mono"
+                className="px-6 py-2 bg-green-600/50 text-green-300 rounded hover:bg-green-600/70 transition-colors font-mono"
               >
-                Complete Setup
+                Go to Dashboard
               </button>
             </div>
           </div>
@@ -440,8 +470,8 @@ export default function NanosOnboarding() {
     
     return (
       <div className="flex justify-between mb-8">
-        {steps.map((step) => (
-          <div key={`step-${step.step}`} className="flex flex-col items-center">
+        {steps.map((step, index) => (
+          <div key={`step-${step.step}`} className="flex flex-col items-center relative">
             <div 
               className={`w-8 h-8 rounded-full flex items-center justify-center ${
                 currentStep >= step.step 
@@ -456,11 +486,18 @@ export default function NanosOnboarding() {
             }`}>
               {step.name}
             </div>
-            {step.step < steps.length - 1 && (
-              <div className="absolute w-[calc(20%-2rem)] h-0.5 mt-4 ml-8" style={{ left: `${step.step * 20}%` }}>
-                <div className={`h-full ${
-                  currentStep > step.step ? 'bg-amber-500/30' : 'bg-gray-800/50'
-                }`} />
+            {index < steps.length - 1 && (
+              <div className="absolute h-0.5 bg-gray-800/50 w-[calc(100%-2rem)]" 
+                   style={{ 
+                     left: '2rem', 
+                     top: '1rem',
+                     zIndex: -1
+                   }}>
+                <div 
+                  className={`h-full ${
+                    currentStep > step.step ? 'bg-amber-500/30' : ''
+                  }`} 
+                />
               </div>
             )}
           </div>
@@ -470,7 +507,7 @@ export default function NanosOnboarding() {
   };
   
   return (
-    <div className="backdrop-blur-sm backdrop-filter bg-black/40 p-6 rounded-xl shadow-xl border border-amber-500/20 transition-all duration-300 hover:bg-black/50">
+    <div className="p-6">
       {renderProgressIndicator()}
       {renderStep()}
     </div>
