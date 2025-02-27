@@ -4,18 +4,18 @@ import { useSocket } from '@/hooks/useSocket';
 import { useEffect, useState } from 'react';
 
 export default function ConnectionStatus() {
-  const { isConnected, connectionError, reconnect } = useSocket();
-  const [reconnecting, setReconnecting] = useState(false);
+  const { isConnected, isConnecting, connectionError, reconnect, connectionState } = useSocket();
+  const [manualReconnecting, setManualReconnecting] = useState(false);
   const [showDetails, setShowDetails] = useState(false);
 
   // Handle reconnect button click
   const handleReconnect = () => {
-    setReconnecting(true);
+    setManualReconnecting(true);
     reconnect();
     
     // Reset the reconnecting state after a delay
     setTimeout(() => {
-      setReconnecting(false);
+      setManualReconnecting(false);
     }, 2000);
   };
 
@@ -25,12 +25,27 @@ export default function ConnectionStatus() {
       setShowDetails(false);
     }
   }, [isConnected]);
+  
+  // Determine status message and color based on connection state
+  let statusColor = 'red';
+  let statusMessage = 'Disconnected';
+  let statusIcon = <span className="inline-block w-2 h-2 rounded-full bg-red-500" />;
+  
+  if (isConnected) {
+    statusColor = 'green';
+    statusMessage = 'Connected';
+    statusIcon = <span className="inline-block w-2 h-2 rounded-full bg-green-500" />;
+  } else if (isConnecting || connectionState.connecting) {
+    statusColor = 'yellow';
+    statusMessage = 'Connecting...';
+    statusIcon = <span className="inline-block w-2 h-2 rounded-full bg-yellow-500 animate-pulse" />;
+  }
 
   if (isConnected) {
     return (
       <div className="flex items-center gap-2 text-xs">
-        <span className="inline-block w-2 h-2 rounded-full bg-green-500" />
-        <span className="text-green-400">Connected</span>
+        {statusIcon}
+        <span className="text-green-400">{statusMessage}</span>
       </div>
     );
   }
@@ -38,8 +53,8 @@ export default function ConnectionStatus() {
   return (
     <div className="text-xs">
       <div className="flex items-center gap-2 mb-1">
-        <span className="inline-block w-2 h-2 rounded-full bg-red-500" />
-        <span className="text-red-400">Disconnected</span>
+        {statusIcon}
+        <span className={`text-${statusColor}-400`}>{statusMessage}</span>
         <button
           type="button"
           onClick={() => setShowDetails(!showDetails)}
@@ -49,21 +64,33 @@ export default function ConnectionStatus() {
         </button>
       </div>
       
-      {showDetails && connectionError && (
+      {showDetails && (
         <div className="mb-2 p-2 bg-black/50 border border-red-500/20 rounded text-red-400/80">
-          {connectionError}
+          {connectionError || 'No specific error message available'}
+          
+          {connectionState.reconnectCount > 0 && (
+            <div className="mt-1 text-amber-400/70 text-[10px]">
+              Reconnection attempts: {connectionState.reconnectCount}
+            </div>
+          )}
+          
+          {connectionState.lastConnectAttempt && (
+            <div className="mt-1 text-amber-400/70 text-[10px]">
+              Last attempt: {new Date(connectionState.lastConnectAttempt).toLocaleTimeString()}
+            </div>
+          )}
         </div>
       )}
       
       <button
         type="button"
         onClick={handleReconnect}
-        disabled={reconnecting}
+        disabled={manualReconnecting || isConnecting}
         className="px-3 py-1 bg-amber-600/30 border border-amber-500/30 text-amber-300 rounded hover:bg-amber-600/40 transition-colors disabled:opacity-50 flex items-center gap-1"
       >
         <svg
           xmlns="http://www.w3.org/2000/svg"
-          className={`h-3 w-3 ${reconnecting ? 'animate-spin' : ''}`}
+          className={`h-3 w-3 ${manualReconnecting || isConnecting ? 'animate-spin' : ''}`}
           viewBox="0 0 20 20"
           fill="currentColor"
           aria-labelledby="reconnect-icon-title"
@@ -75,7 +102,7 @@ export default function ConnectionStatus() {
             clipRule="evenodd"
           />
         </svg>
-        {reconnecting ? 'Reconnecting...' : 'Reconnect'}
+        {manualReconnecting || isConnecting ? 'Reconnecting...' : 'Reconnect'}
       </button>
     </div>
   );

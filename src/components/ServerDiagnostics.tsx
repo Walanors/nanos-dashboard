@@ -4,7 +4,7 @@ import { useState, useEffect } from 'react';
 import { useSocket } from '@/hooks/useSocket';
 
 export default function ServerDiagnostics() {
-  const { connectionError } = useSocket();
+  const { connectionState, connectionError } = useSocket();
   const [apiStatus, setApiStatus] = useState<string>('Checking...');
   const [apiDetails, setApiDetails] = useState<string | null>(null);
   const [showDiagnostics, setShowDiagnostics] = useState(false);
@@ -25,7 +25,7 @@ export default function ServerDiagnostics() {
         }
       } catch (error) {
         setApiStatus(`Next.js API Error: ${(error as Error).message}`);
-        setApiDetails(`This may indicate that the Next.js server is not running or has an error.`);
+        setApiDetails('This may indicate that the Next.js server is not running or has an error.');
         return; // If this fails, no need to check the authenticated endpoint
       }
       
@@ -34,7 +34,7 @@ export default function ServerDiagnostics() {
         // Get credentials for authentication
         const credentials = sessionStorage.getItem('credentials');
         if (!credentials) {
-          setApiDetails(prev => prev + '\n\nNo credentials found for authenticated API check.');
+          setApiDetails(prev => `${prev}\n\nNo credentials found for authenticated API check.`);
           return;
         }
         
@@ -50,15 +50,15 @@ export default function ServerDiagnostics() {
         
         if (response.ok) {
           const data = await response.json();
-          setApiStatus(prev => prev + ' | Auth API: Connected ✅');
-          setApiDetails(prev => prev + '\n\nAuthenticated API: ' + JSON.stringify(data, null, 2));
+          setApiStatus(prev => `${prev} | Auth API: Connected ✅`);
+          setApiDetails(prev => `${prev}\n\nAuthenticated API: ${JSON.stringify(data, null, 2)}`);
         } else {
-          setApiStatus(prev => prev + ` | Auth API Error: ${response.status}`);
-          setApiDetails(prev => prev + '\n\nThis may indicate authentication issues.');
+          setApiStatus(prev => `${prev} | Auth API Error: ${response.status}`);
+          setApiDetails(prev => `${prev}\n\nThis may indicate authentication issues.`);
         }
       } catch (error) {
-        setApiStatus(prev => prev + ` | Auth API Error: ${(error as Error).message}`);
-        setApiDetails(prev => prev + '\n\nThis may indicate that the Express server is not running correctly.');
+        setApiStatus(prev => `${prev} | Auth API Error: ${(error as Error).message}`);
+        setApiDetails(prev => `${prev}\n\nThis may indicate that the Express server is not running correctly.`);
       }
     }
     
@@ -92,6 +92,28 @@ export default function ServerDiagnostics() {
           </div>
           
           <div className="mb-2">
+            <div className="text-xs text-white mb-1">Connection State:</div>
+            <div className="text-xs font-mono bg-purple-900/20 p-2 rounded">
+              <div className={connectionState.connected ? 'text-green-300' : 'text-red-300'}>
+                Connected: {connectionState.connected ? 'Yes' : 'No'}
+              </div>
+              <div className={connectionState.connecting ? 'text-yellow-300' : 'text-purple-300'}>
+                Connecting: {connectionState.connecting ? 'Yes' : 'No'}
+              </div>
+              {connectionState.reconnectCount > 0 && (
+                <div className="text-amber-300">
+                  Reconnect Attempts: {connectionState.reconnectCount}
+                </div>
+              )}
+              {connectionState.lastConnectAttempt && (
+                <div className="text-purple-300">
+                  Last Attempt: {new Date(connectionState.lastConnectAttempt).toLocaleTimeString()}
+                </div>
+              )}
+            </div>
+          </div>
+          
+          <div className="mb-2">
             <div className="text-xs text-white mb-1">Socket Error:</div>
             <div className="text-xs font-mono text-red-300 bg-red-900/20 p-2 rounded">
               {connectionError || 'No socket error'}
@@ -105,6 +127,7 @@ export default function ServerDiagnostics() {
               <li>Verify credentials are correct</li>
               <li>Confirm server has socket.io enabled</li>
               <li>Check for CORS issues</li>
+              <li>Inspect network tab for WebSocket connections</li>
             </ul>
           </div>
         </div>

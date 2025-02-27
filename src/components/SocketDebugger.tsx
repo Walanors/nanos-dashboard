@@ -1,50 +1,91 @@
 'use client';
 
 import { useSocket } from '@/hooks/useSocket';
-import { useEffect, useState } from 'react';
+import { useEffect, useState, useCallback } from 'react';
 
 // This component helps debug socket connection issues by providing
 // detailed information about connection attempts and status
 export default function SocketDebugger() {
-  const { socket, isConnected, connectionError } = useSocket();
+  const { socket, connectionState, isConnected, connectionError } = useSocket();
   const [logs, setLogs] = useState<string[]>([]);
   const [showDebugger, setShowDebugger] = useState(false);
   
+  // Helper to format time
+  const formatTime = useCallback(() => {
+    return new Date().toLocaleTimeString('en-US', { 
+      hour12: false, 
+      hour: '2-digit', 
+      minute: '2-digit', 
+      second: '2-digit',
+      fractionalSecondDigits: 3
+    });
+  }, []);
+  
+  // Add a log entry
+  const addLog = useCallback((message: string) => {
+    setLogs(prev => {
+      // Keep only the last 100 logs to prevent excessive memory usage
+      const newLogs = [...prev, `[${formatTime()}] ${message}`];
+      if (newLogs.length > 100) {
+        return newLogs.slice(-100);
+      }
+      return newLogs;
+    });
+  }, [formatTime]);
+  
+  // Listen for socket events from the context
+  useEffect(() => {
+    const handleSocketEvent = (event: Event) => {
+      const customEvent = event as CustomEvent;
+      if (customEvent.detail) {
+        const { type, details, timestamp } = customEvent.detail;
+        const detailsStr = details ? ` - ${JSON.stringify(details)}` : '';
+        addLog(`${type}${detailsStr}`);
+      }
+    };
+    
+    window.addEventListener('socket-event', handleSocketEvent);
+    
+    return () => {
+      window.removeEventListener('socket-event', handleSocketEvent);
+    };
+  }, [addLog]);
+  
   useEffect(() => {
     // Add initial log
-    setLogs(prev => [...prev, `[${new Date().toISOString()}] Socket debugger initialized`]);
+    addLog('Socket debugger initialized');
     
     if (!socket) {
-      setLogs(prev => [...prev, `[${new Date().toISOString()}] No socket instance available. Check credentials.`]);
+      addLog('No socket instance available. Check credentials.');
       return;
     }
     
     // Log connection state
-    setLogs(prev => [...prev, `[${new Date().toISOString()}] Current connection state: ${isConnected ? 'Connected' : 'Disconnected'}`]);
+    addLog(`Current connection state: ${isConnected ? 'Connected' : 'Disconnected'}`);
     
     // Set up listeners for all relevant socket events
     const onConnect = () => {
-      setLogs(prev => [...prev, `[${new Date().toISOString()}] Connection established (ID: ${socket.id})`]);
+      addLog(`Connection established (ID: ${socket.id})`);
     };
     
     const onConnectError = (err: Error) => {
-      setLogs(prev => [...prev, `[${new Date().toISOString()}] Connection error: ${err.message}`]);
+      addLog(`Connection error: ${err.message}`);
     };
     
     const onReconnectAttempt = (attempt: number) => {
-      setLogs(prev => [...prev, `[${new Date().toISOString()}] Reconnection attempt #${attempt}`]);
+      addLog(`Reconnection attempt #${attempt}`);
     };
     
     const onDisconnect = (reason: string) => {
-      setLogs(prev => [...prev, `[${new Date().toISOString()}] Disconnected: ${reason}`]);
+      addLog(`Disconnected: ${reason}`);
     };
     
     const onReconnectFailed = () => {
-      setLogs(prev => [...prev, `[${new Date().toISOString()}] Reconnection failed after all attempts`]);
+      addLog(`Reconnection failed after all attempts`);
     };
     
     const onError = (err: Error) => {
-      setLogs(prev => [...prev, `[${new Date().toISOString()}] Socket error: ${err.message}`]);
+      addLog(`Socket error: ${err.message}`);
     };
     
     // Add all listeners
@@ -57,7 +98,16 @@ export default function SocketDebugger() {
     
     // Add additional debug info
     if (connectionError) {
-      setLogs(prev => [...prev, `[${new Date().toISOString()}] Current error: ${connectionError}`]);
+      addLog(`Current error: ${connectionError}`);
+    }
+    
+    if (connectionState.reconnectCount > 0) {
+      addLog(`Reconnect count: ${connectionState.reconnectCount}`);
+    }
+    
+    if (connectionState.lastConnectAttempt) {
+      const timeAgo = Math.round((Date.now() - connectionState.lastConnectAttempt) / 1000);
+      addLog(`Last connection attempt: ${timeAgo} seconds ago`);
     }
     
     return () => {
@@ -71,11 +121,12 @@ export default function SocketDebugger() {
         socket.off('error', onError);
       }
     };
-  }, [socket, isConnected, connectionError]);
+  }, [socket, isConnected, connectionError, connectionState, addLog]);
   
   return (
     <div className="fixed bottom-4 right-4 z-50">
       <button
+        type="button"
         onClick={() => setShowDebugger(!showDebugger)}
         className="bg-amber-600 text-black px-3 py-1 rounded text-xs hover:bg-amber-500"
       >
@@ -87,14 +138,31 @@ export default function SocketDebugger() {
           <div className="flex justify-between items-center mb-2">
             <h3 className="text-amber-400 text-sm font-mono">Socket Debugger</h3>
             <div className="flex items-center gap-2">
-              <div className={`w-2 h-2 rounded-full ${isConnected ? 'bg-green-500' : 'bg-red-500'}`}></div>
-              <span className="text-xs text-amber-300/80">{isConnected ? 'Connected' : 'Disconnected'}</span>
+              <div className={`w-2 h-2 rounded-full ${
+                isConnected 
+                  ? 'bg-green-500' 
+                  : connectionState.connecting 
+                    ? 'bg-yellow-500 animate-pulse' 
+                    : 'bg-red-500'
+              }`} />
+              <span className="text-xs text-amber-300/80">
+                {isConnected 
+                  ? 'Connected' 
+                  : connectionState.connecting 
+                    ? 'Connecting...' 
+                    : 'Disconnected'}
+              </span>
+              {connectionState.reconnectCount > 0 && (
+                <span className="text-xs text-amber-300/60 ml-1">
+                  (Attempts: {connectionState.reconnectCount})
+                </span>
+              )}
             </div>
           </div>
           
           <div className="text-xs font-mono text-amber-400/80 whitespace-pre-wrap break-words">
-            {logs.map((log, index) => (
-              <div key={index} className="mb-1 border-b border-amber-500/10 pb-1">{log}</div>
+            {logs.map((log, i) => (
+              <div key={`log-${i}`} className="mb-1 border-b border-amber-500/10 pb-1">{log}</div>
             ))}
             
             {logs.length === 0 && (

@@ -1,6 +1,7 @@
 'use client';
 
 import { createContext, useContext, useEffect, useState, useCallback, type ReactNode } from 'react';
+import { StableSocket, type Socket as StableSocketInstance } from '@github/stable-socket';
 import { io, type Socket } from 'socket.io-client';
 
 // Types
@@ -49,9 +50,18 @@ interface SocketResponse<T> {
   error?: string;
 }
 
+interface ConnectionState {
+  connected: boolean;
+  connecting: boolean;
+  error: string | null;
+  reconnectCount: number;
+  lastConnectAttempt: number | null;
+}
+
 interface SocketContextType {
   socket: Socket | null;
   isConnected: boolean;
+  isConnecting: boolean;
   connectionError: string | null;
   metrics: SystemMetrics | null;
   reconnect: () => void;
@@ -59,12 +69,14 @@ interface SocketContextType {
   readFile: (path: string) => Promise<string>;
   writeFile: (path: string, content: string) => Promise<void>;
   listFiles: (dirPath: string) => Promise<FileListResult[]>;
+  connectionState: ConnectionState;
 }
 
 // Create context with default values
 const SocketContext = createContext<SocketContextType>({
   socket: null,
   isConnected: false,
+  isConnecting: false,
   connectionError: null,
   metrics: null,
   reconnect: () => {},
@@ -72,23 +84,60 @@ const SocketContext = createContext<SocketContextType>({
   readFile: () => Promise.reject(new Error('Socket not initialized')),
   writeFile: () => Promise.reject(new Error('Socket not initialized')),
   listFiles: () => Promise.reject(new Error('Socket not initialized')),
+  connectionState: {
+    connected: false,
+    connecting: false,
+    error: null,
+    reconnectCount: 0,
+    lastConnectAttempt: null
+  }
 });
+
+// StableSocket delegate type
+interface StableSocketDelegate {
+  socketDidOpen: (socket: StableSocketInstance) => void;
+  socketDidClose: (socket: StableSocketInstance, code?: number, reason?: string) => void;
+  socketDidFinish: (socket: StableSocketInstance) => void;
+  socketDidReceiveMessage: (socket: StableSocketInstance, message: string) => void;
+  socketShouldRetry: (socket: StableSocketInstance, code: number) => boolean;
+}
 
 // Provider component
 export function SocketProvider({ children }: { children: ReactNode }) {
   const [socket, setSocket] = useState<Socket | null>(null);
-  const [isConnected, setIsConnected] = useState(false);
-  const [connectionError, setConnectionError] = useState<string | null>(null);
+  const [stableSocket, setStableSocket] = useState<StableSocket | null>(null);
   const [metrics, setMetrics] = useState<SystemMetrics | null>(null);
-  const [reconnectAttempts, setReconnectAttempts] = useState(0);
+  const [connectionState, setConnectionState] = useState<ConnectionState>({
+    connected: false,
+    connecting: false,
+    error: null,
+    reconnectCount: 0,
+    lastConnectAttempt: null
+  });
   const [credentialsBase64, setCredentialsBase64] = useState<string | null>(null);
 
-  // Initialize socket connection
+  // Helper function to log connection state changes
+  const logConnectionEvent = useCallback((event: string, details?: Record<string, unknown>) => {
+    console.log(`[Socket] ${event}`, details || '');
+    
+    // For debugging purposes, we can dispatch a custom event
+    if (typeof window !== 'undefined') {
+      window.dispatchEvent(new CustomEvent('socket-event', { 
+        detail: { type: event, details, timestamp: Date.now() } 
+      }));
+    }
+  }, []);
+
+  // Socket connection initialization
   const initializeSocket = useCallback(() => {
-    // Get credentials from session storage
+    // Check for existing credentials
     const storedCredentials = sessionStorage.getItem('credentials');
     if (!storedCredentials) {
-      setConnectionError('No credentials found');
+      setConnectionState(prev => ({
+        ...prev,
+        error: 'No credentials found',
+        connecting: false
+      }));
       return null;
     }
 
@@ -98,155 +147,214 @@ export function SocketProvider({ children }: { children: ReactNode }) {
       const [username, password] = credentialsString.split(':');
       
       if (!username || !password) {
-        console.error('Invalid credentials format', { username: !!username, password: !!password });
-        setConnectionError('Invalid credentials format');
+        logConnectionEvent('Invalid credentials format', { username: !!username, password: !!password });
+        setConnectionState(prev => ({
+          ...prev,
+          error: 'Invalid credentials format',
+          connecting: false
+        }));
         return null;
       }
       
-      console.log('Creating socket connection with credentials');
+      // Set connection state to connecting
+      setConnectionState(prev => ({
+        ...prev,
+        connecting: true,
+        lastConnectAttempt: Date.now(),
+        error: null
+      }));
+      
+      logConnectionEvent('Creating socket connection');
 
-      // We'll check server availability separately without awaiting
-      fetch('/api/server-check')
-        .then(response => {
-          console.log('Server check result:', response.ok ? 'Available' : `Error: ${response.status}`);
-        })
-        .catch(error => {
-          console.warn('Server check failed:', error.message);
-        });
-
-      // Create socket instance with better reconnection settings
+      // Determine server URL based on environment
       const serverUrl = window.location.hostname === 'localhost' 
         ? 'http://localhost:3000' 
         : window.location.origin;
-
-      console.log('Attempting socket connection to:', serverUrl);
-
-      // Keep the robust connection approach but without async/await
-      let newSocket: Socket;
-
-      try {
-        // First attempt - standard connection with websocket first
-        newSocket = io(serverUrl, {
-          auth: { username, password },
-          reconnection: true,
-          reconnectionAttempts: 5,
-          reconnectionDelay: 1000,
-          reconnectionDelayMax: 5000,
-          timeout: 10000,
-          path: '/socket.io/',
-          transports: ['websocket', 'polling'],
-          autoConnect: true
+      
+      // Check server availability without waiting
+      fetch('/api/server-check')
+        .then(response => {
+          logConnectionEvent('Server check result', { available: response.ok, status: response.status });
+        })
+        .catch(error => {
+          logConnectionEvent('Server check failed', { error: error.message });
         });
-        
-        console.log('Primary socket connection attempt made');
-        
-        // Set up direct error logging for the IO manager
-        newSocket.io.on("error", (error) => {
-          console.error('Socket manager error:', error);
-        });
-        
-      } catch (initialError) {
-        console.error('Initial socket connection attempt failed:', initialError);
-        
-        // Fallback - try with only polling transport which is more reliable but slower
-        try {
-          console.log('Trying fallback connection method...');
-          newSocket = io(serverUrl, {
-            auth: { username, password },
-            reconnection: true,
-            reconnectionAttempts: 10,
-            reconnectionDelay: 1000,
-            reconnectionDelayMax: 5000,
-            timeout: 20000,
-            path: '/socket.io/',
-            transports: ['polling'],
-            autoConnect: true
-          });
-          
-          console.log('Fallback socket connection attempt made');
-        } catch (fallbackError) {
-          console.error('Fallback socket connection also failed:', fallbackError);
-          setConnectionError(`Failed to initialize socket connection: ${(fallbackError as Error).message}`);
-          return null;
+
+      // Create a StableSocket instance
+      const wsUrl = new URL('/socket.io/', serverUrl);
+      wsUrl.protocol = wsUrl.protocol.replace('http', 'ws');
+      
+      // Create the StableSocket delegate for handling events
+      const socketDelegate: StableSocketDelegate = {
+        socketDidOpen: (socket) => {
+          logConnectionEvent('StableSocket opened');
+        },
+        socketDidClose: (socket, code, reason) => {
+          logConnectionEvent('StableSocket closed', { code, reason });
+          setConnectionState(prev => ({
+            ...prev,
+            connected: false,
+            connecting: true
+          }));
+        },
+        socketDidFinish: (socket) => {
+          logConnectionEvent('StableSocket finished (no more retries)');
+          setConnectionState(prev => ({
+            ...prev,
+            connected: false,
+            connecting: false
+          }));
+        },
+        socketDidReceiveMessage: (socket, message) => {
+          logConnectionEvent('StableSocket message', { message });
+        },
+        socketShouldRetry: (socket, code) => {
+          // Retry unless it's a policy violation (1008)
+          const shouldRetry = code !== 1008;
+          logConnectionEvent('StableSocket checking retry', { code, shouldRetry });
+          return shouldRetry;
         }
-      }
-
-      // Log the connection status
-      console.log('Socket instance created:', { 
-        id: newSocket.id,
-        connected: newSocket.connected,
-        disconnected: newSocket.disconnected
+      };
+      
+      // Connection policy
+      const policy = {
+        timeout: 10000,      // 10s connection timeout
+        attempts: 10,        // Max 10 reconnect attempts
+        maxDelay: 30000      // Max 30s between reconnect attempts
+      };
+      
+      // Create the stable socket with the delegate and policy
+      const stable = new StableSocket(wsUrl.toString(), socketDelegate, policy);
+      stable.open();  // Explicitly open the connection
+      
+      // Create socket.io instance
+      const socketInstance = io(serverUrl, {
+        auth: { username, password },
+        reconnection: true,
+        reconnectionAttempts: 5,
+        reconnectionDelay: 1000,
+        reconnectionDelayMax: 5000,
+        timeout: 10000,
+        path: '/socket.io/',
+        autoConnect: true
       });
       
-      // Add a direct connection error listener
-      newSocket.on('connect_error', (err: Error) => {
-        console.error('Socket connect_error event:', err.message);
+      // Set up Socket.io event listeners
+      socketInstance.on('connect', () => {
+        logConnectionEvent('Socket.io connected', { id: socketInstance.id });
+        setConnectionState(prev => ({
+          ...prev,
+          connected: true,
+          connecting: false,
+          error: null,
+          reconnectCount: 0
+        }));
       });
       
-      return newSocket;
+      socketInstance.on('connect_error', (err) => {
+        logConnectionEvent('Socket.io connect_error', { message: err.message });
+        setConnectionState(prev => ({
+          ...prev,
+          connected: false,
+          connecting: false,
+          error: `Connection error: ${err.message}`,
+          reconnectCount: prev.reconnectCount + 1
+        }));
+      });
+      
+      socketInstance.on('disconnect', (reason) => {
+        logConnectionEvent('Socket.io disconnected', { reason });
+        setConnectionState(prev => ({
+          ...prev,
+          connected: false,
+          error: reason === 'io server disconnect' ? 'Server disconnected' : `Disconnected: ${reason}`
+        }));
+        
+        // For certain disconnect reasons, attempt immediate reconnection
+        if (reason === 'io server disconnect') {
+          socketInstance.connect();
+        }
+      });
+      
+      // Listen for system metrics updates
+      socketInstance.on('system_metrics', (data: SystemMetrics) => {
+        setMetrics(data);
+      });
+      
+      // Set up heartbeat mechanism
+      const pingInterval = setInterval(() => {
+        if (socketInstance?.connected) {
+          socketInstance.emit('ping', null, (response: { success: boolean, timestamp: number } | undefined) => {
+            if (!response) {
+              logConnectionEvent('No heartbeat response', { connected: socketInstance.connected });
+              if (socketInstance.connected) {
+                socketInstance.disconnect().connect();
+              }
+            }
+          });
+        }
+      }, 30000); // 30s heartbeat interval
+      
+      // Store references
+      setStableSocket(stable);
+      setSocket(socketInstance);
+      
+      // Return socket to be stored
+      return socketInstance;
     } catch (err) {
-      console.error('Error creating socket:', err);
-      setConnectionError(`Failed to initialize socket connection: ${(err as Error).message}`);
+      logConnectionEvent('Error creating socket', { error: (err as Error).message });
+      setConnectionState(prev => ({
+        ...prev,
+        error: `Failed to initialize socket: ${(err as Error).message}`,
+        connecting: false
+      }));
       return null;
     }
-  }, []);
+  }, [logConnectionEvent]);
 
-  // Reconnect function to manually reconnect the socket
+  // Reconnect function
   const reconnect = useCallback(() => {
+    logConnectionEvent('Manual reconnect initiated');
+    
+    setConnectionState(prev => ({
+      ...prev,
+      connecting: true,
+      reconnectCount: prev.reconnectCount + 1,
+      lastConnectAttempt: Date.now()
+    }));
+    
+    // Clean up existing socket if needed
     if (socket) {
-      console.log('Manually reconnecting socket...');
-      
-      // Try a series of reconnection strategies
+      socket.disconnect();
+      socket.removeAllListeners();
+    }
+    
+    if (stableSocket) {
       try {
-        // First try a simple reconnect
-        socket.connect();
-        console.log('Socket reconnection initiated');
-        
-        // Set a timeout to check if connection was established
-        setTimeout(() => {
-          if (!socket.connected) {
-            console.log('Reconnection seemingly failed, trying force restart');
-            // Try force disconnect and reconnect
-            socket.disconnect().connect();
-            
-            // Set another timeout for the final check
-            setTimeout(() => {
-              if (!socket.connected) {
-                console.log('Force reconnect failed, creating new socket instance');
-                // If still not connected, try creating a completely new socket
-                const newSocket = initializeSocket();
-                if (newSocket) {
-                  console.log('New socket instance created during reconnect');
-                  setSocket(newSocket);
-                }
-              }
-            }, 2000);
-          }
-        }, 3000);
+        stableSocket.open(); // Use open() instead of reconnect()
       } catch (error) {
-        console.error('Error during reconnect attempts:', error);
-        const newSocket = initializeSocket();
-        if (newSocket) {
-          setSocket(newSocket);
-        }
-      }
-      
-      setReconnectAttempts(prev => prev + 1);
-    } else {
-      console.log('No existing socket, creating new one');
-      const newSocket = initializeSocket();
-      if (newSocket) {
-        setSocket(newSocket);
+        logConnectionEvent('StableSocket open error', { error: (error as Error).message });
       }
     }
-  }, [socket, initializeSocket]);
+    
+    // Create a new socket instance
+    const newSocket = initializeSocket();
+    if (newSocket) {
+      setSocket(newSocket);
+    }
+  }, [socket, stableSocket, initializeSocket, logConnectionEvent]);
 
-  // Effect to setup and manage socket connection
+  // Effect to setup and manage socket connection based on credentials
   useEffect(() => {
     // Check if credentials are in sessionStorage
     const storedCredentials = sessionStorage.getItem('credentials');
     if (storedCredentials !== credentialsBase64) {
-      // Credentials changed, update and reinitialize socket
+      logConnectionEvent('Credentials changed', { 
+        hadPrevious: !!credentialsBase64, 
+        hasNew: !!storedCredentials 
+      });
+      
+      // Update stored credentials
       setCredentialsBase64(storedCredentials);
       
       // Clean up existing socket if any
@@ -255,102 +363,58 @@ export function SocketProvider({ children }: { children: ReactNode }) {
         socket.removeAllListeners();
       }
       
+      if (stableSocket) {
+        try {
+          stableSocket.close(); // Use close() method 
+        } catch (error) {
+          logConnectionEvent('Error closing StableSocket', { error: (error as Error).message });
+        }
+      }
+      
       if (!storedCredentials) {
-        setConnectionError('No credentials found');
+        setConnectionState(prev => ({
+          ...prev,
+          error: 'No credentials found',
+          connected: false,
+          connecting: false
+        }));
         setSocket(null);
+        setStableSocket(null);
         return;
       }
       
       // Initialize new socket
       const newSocket = initializeSocket();
-      if (!newSocket) return;
+      if (newSocket) {
+        setSocket(newSocket);
+      }
+    }
+    
+    // Cleanup when component unmounts
+    return () => {
+      logConnectionEvent('Socket provider unmounting');
       
-      setSocket(newSocket);
+      if (socket) {
+        socket.disconnect();
+        socket.removeAllListeners();
+      }
       
-      // Set up event listeners
-      newSocket.on('connect', () => {
-        console.log('Socket connected with ID:', newSocket.id);
-        console.log('Socket connection details:', {
-          id: newSocket.id,
-          connected: newSocket.connected,
-          disconnected: newSocket.disconnected,
-        });
-        setIsConnected(true);
-        setConnectionError(null);
-        setReconnectAttempts(0);
-      });
-      
-      newSocket.on('connect_error', (err) => {
-        console.error('Socket connection error:', err.message);
-        console.error('Connection error details:', {
-          message: err.message,
-        });
-        setIsConnected(false);
-        setConnectionError(`Connection error: ${err.message}`);
-      });
-      
-      newSocket.on('disconnect', (reason) => {
-        console.log('Socket disconnected:', reason);
-        console.log('Disconnect details:', {
-          wasConnected: newSocket.connected,
-          reason
-        });
-        setIsConnected(false);
-        
-        // Handle various disconnect reasons
-        if (reason === 'io server disconnect') {
-          // Server disconnected, need to reconnect manually
-          console.log('Server disconnected the socket, attempting to reconnect...');
-          newSocket.connect();
-        } else if (reason === 'transport close' || reason === 'ping timeout') {
-          // These are typically network issues that socket.io will try to reconnect automatically
-          console.log('Network issue detected, socket.io will attempt automatic reconnection');
-          setConnectionError(`Network issue: ${reason}`);
-        } else {
-          setConnectionError(`Disconnected: ${reason}`);
-        }
-      });
-      
-      // Listen for system metrics updates
-      newSocket.on('system_metrics', (data: SystemMetrics) => {
-        setMetrics(data);
-      });
-      
-      // Error event
-      newSocket.on('error', (err) => {
-        console.error('Socket error:', err);
-        setConnectionError(`Socket error: ${err.message || 'Unknown error'}`);
-      });
-      
-      // Set up a heartbeat mechanism to detect dead connections
-      const pingInterval = setInterval(() => {
-        if (newSocket && isConnected) {
-          newSocket.emit('ping', null, (response: { success: boolean, timestamp: number } | undefined) => {
-            // If we get a response, connection is alive
-            if (!response) {
-              console.warn('No heartbeat response, connection may be dead');
-              // If no response and socket thinks it's connected, try to reconnect
-              if (newSocket.connected) {
-                console.log('Force reconnecting socket due to no heartbeat');
-                newSocket.disconnect().connect();
-              }
-            }
+      if (stableSocket) {
+        try {
+          stableSocket.close(); // Use close() method
+        } catch (error) {
+          logConnectionEvent('Error closing StableSocket during cleanup', { 
+            error: (error as Error).message 
           });
         }
-      }, 30000); // Check every 30 seconds
-      
-      return () => {
-        clearInterval(pingInterval);
-        newSocket.disconnect();
-        newSocket.removeAllListeners();
-      };
-    }
-  }, [credentialsBase64, initializeSocket, socket, isConnected]);
+      }
+    };
+  }, [credentialsBase64, initializeSocket, socket, stableSocket, logConnectionEvent]);
 
   // Execute command via socket
   const executeCommand = useCallback((command: string): Promise<CommandResult> => {
     return new Promise((resolve, reject) => {
-      if (!socket || !isConnected) {
+      if (!socket || !connectionState.connected) {
         reject(new Error('Socket not connected'));
         return;
       }
@@ -369,12 +433,12 @@ export function SocketProvider({ children }: { children: ReactNode }) {
         }
       });
     });
-  }, [socket, isConnected]);
+  }, [socket, connectionState.connected]);
   
   // File operations with timeout handling
   const readFile = useCallback((path: string): Promise<string> => {
     return new Promise((resolve, reject) => {
-      if (!socket || !isConnected) {
+      if (!socket || !connectionState.connected) {
         reject(new Error('Socket not connected'));
         return;
       }
@@ -392,11 +456,11 @@ export function SocketProvider({ children }: { children: ReactNode }) {
         }
       });
     });
-  }, [socket, isConnected]);
+  }, [socket, connectionState.connected]);
   
   const writeFile = useCallback((path: string, content: string): Promise<void> => {
     return new Promise((resolve, reject) => {
-      if (!socket || !isConnected) {
+      if (!socket || !connectionState.connected) {
         reject(new Error('Socket not connected'));
         return;
       }
@@ -414,11 +478,11 @@ export function SocketProvider({ children }: { children: ReactNode }) {
         }
       });
     });
-  }, [socket, isConnected]);
+  }, [socket, connectionState.connected]);
   
   const listFiles = useCallback((dirPath: string): Promise<FileListResult[]> => {
     return new Promise((resolve, reject) => {
-      if (!socket || !isConnected) {
+      if (!socket || !connectionState.connected) {
         reject(new Error('Socket not connected'));
         return;
       }
@@ -436,19 +500,21 @@ export function SocketProvider({ children }: { children: ReactNode }) {
         }
       });
     });
-  }, [socket, isConnected]);
+  }, [socket, connectionState.connected]);
 
   // Context value
   const value = {
     socket,
-    isConnected,
-    connectionError,
+    isConnected: connectionState.connected,
+    isConnecting: connectionState.connecting,
+    connectionError: connectionState.error,
     metrics,
     reconnect,
     executeCommand,
     readFile,
     writeFile,
     listFiles,
+    connectionState
   };
 
   return (
