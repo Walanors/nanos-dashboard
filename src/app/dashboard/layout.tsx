@@ -33,10 +33,26 @@ export default function DashboardLayout({
     }
     
     try {
-      const parsed = JSON.parse(credentials);
-      setUserData({
-        username: parsed.username || 'Admin',
-      });
+      // Handle both JSON and Base64 encoded credentials
+      let username = '';
+      
+      // Check if the credentials are in JSON format
+      if (credentials.startsWith('{')) {
+        const parsed = JSON.parse(credentials);
+        username = parsed.username || 'Admin';
+      } else {
+        // Handle Base64 encoded credentials (username:password format)
+        try {
+          // For Basic Auth format (username:password)
+          const decoded = atob(credentials);
+          username = decoded.split(':')[0] || 'Admin';
+        } catch (e) {
+          // If not valid Base64, just use it as is
+          username = credentials;
+        }
+      }
+      
+      setUserData({ username });
       setIsLoading(false);
     } catch (error) {
       console.error('Error parsing credentials:', error);

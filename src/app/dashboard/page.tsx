@@ -6,36 +6,13 @@ import { useSocket } from '@/hooks/useSocket';
 
 export default function DashboardPage() {
   const router = useRouter();
-  const [isLoading, setIsLoading] = useState(true);
+  // Layout already handles authentication, no need for duplicate loading state
   
   // Get socket connection with metrics
   const { isConnected, connectionError: socketError, metrics } = useSocket();
-  
-  useEffect(() => {
-    // Check if user is authenticated
-    const credentials = sessionStorage.getItem('credentials');
-    
-    if (!credentials) {
-      console.log('No credentials found, redirecting to login');
-      router.push('/');
-    } else {
-      setIsLoading(false);
-    }
-  }, [router]);
 
-  if (isLoading) {
-    return (
-      <div className="flex justify-center items-center h-screen">
-        <div className="animate-pulse text-amber-400 text-lg font-mono">
-          <span className="mr-2">$</span>
-          Loading system data...
-        </div>
-      </div>
-    );
-  }
-  
-  // Show connection error if socket isn't connected after loading
-  if (!isConnected && socketError && !isLoading) {
+  // Show connection error if socket isn't connected
+  if (!isConnected && socketError) {
     return (
       <div className="min-h-screen bg-black/95 flex items-center justify-center">
         <div className="bg-black/70 border border-red-500/30 p-4 rounded-lg max-w-md text-center">

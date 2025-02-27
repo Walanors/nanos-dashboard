@@ -17,7 +17,6 @@ interface SystemSettings {
 
 export default function SettingsPage() {
   const router = useRouter();
-  const [isLoading, setIsLoading] = useState(true);
   const [isSaving, setIsSaving] = useState(false);
   const [settings, setSettings] = useState<SystemSettings>({
     debugMode: false,
@@ -32,20 +31,19 @@ export default function SettingsPage() {
   // Get socket connection
   const { socket, isConnected, connectionError: socketError } = useSocket();
   
-  useEffect(() => {
-    // Check if user is authenticated
-    const credentials = sessionStorage.getItem('credentials');
-    
-    if (!credentials) {
-      console.log('No credentials found, redirecting to login');
-      router.push('/');
-    } else {
-      setIsLoading(false);
+  // Function to fetch settings from the server
+  const fetchSettings = () => {
+    if (socket && isConnected) {
+      socket.emit('settings:getAll', (response: { success: boolean, settings?: SystemSettings }) => {
+        if (response.success && response.settings) {
+          setSettings(response.settings);
+        }
+      });
     }
-  }, [router]);
-
+  };
+  
   useEffect(() => {
-    // Fetch current settings
+    // Fetch current settings on initial load
     if (socket && isConnected) {
       socket.emit('settings:getAll', (response: { success: boolean, settings?: SystemSettings }) => {
         if (response.success && response.settings) {
@@ -80,50 +78,29 @@ export default function SettingsPage() {
   };
 
   const resetSettings = () => {
-    if (!socket || !isConnected) return;
-    
-    if (confirm('Are you sure you want to reset all settings to defaults?')) {
-      socket.emit('settings:reset', (response: { success: boolean, settings?: SystemSettings, message?: string }) => {
-        if (response.success && response.settings) {
-          setSettings(response.settings);
-          alert('Settings have been reset to defaults.');
-        } else if (response.message) {
-          console.error('Failed to reset settings:', response.message);
-          alert(`Failed to reset settings: ${response.message}`);
+    if (socket && isConnected) {
+      setIsSaving(true);
+      socket.emit('settings:reset', (response: { success: boolean }) => {
+        setIsSaving(false);
+        if (response.success) {
+          // Refetch settings
+          fetchSettings();
         }
       });
     }
   };
 
-  if (isLoading) {
-    return (
-      <div className="flex justify-center items-center h-screen">
-        <div className="animate-pulse text-amber-400 text-lg font-mono">
-          <span className="mr-2">$</span>
-          Loading settings...
-        </div>
-      </div>
-    );
-  }
-  
-  // Show connection error if socket isn't connected after loading
-  if (!isConnected && socketError && !isLoading) {
+  // Show connection error if socket isn't connected
+  if (!isConnected && socketError) {
     return (
       <div className="min-h-screen bg-black/95 flex items-center justify-center">
         <div className="bg-black/70 border border-red-500/30 p-4 rounded-lg max-w-md text-center">
           <h3 className="text-red-400 text-lg mb-2">Connection Error</h3>
           <p className="text-amber-300/80 mb-4">{socketError}</p>
           <p className="text-amber-400/60 text-sm">
-            Unable to load system settings. 
+            Unable to load settings.
             Please check your connection and try again.
           </p>
-          <button 
-            type="button"
-            onClick={() => router.push('/dashboard')}
-            className="px-4 py-2 bg-amber-500/20 text-amber-300 rounded mt-4 hover:bg-amber-500/30 transition-colors"
-          >
-            Return to Dashboard
-          </button>
         </div>
       </div>
     );
