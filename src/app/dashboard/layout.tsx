@@ -6,9 +6,7 @@ import { usePathname, useRouter } from 'next/navigation';
 import { useSocket } from '@/hooks/useSocket';
 import { useUser } from '@/hooks/useUser';
 import NanosOnboarding from '@/components/NanosOnboarding';
-import ConnectionStatus from '@/components/ConnectionStatus';
 import SocketDebugger from '@/components/SocketDebugger';
-import ServerDiagnostics from '@/components/ServerDiagnostics';
 import { toast } from 'react-hot-toast';
 
 export default function DashboardLayout({
@@ -202,9 +200,6 @@ export default function DashboardLayout({
               DASHBOARD
             </div>
           </div>
-          <div className="mt-2">
-            <ConnectionStatus />
-          </div>
         </div>
 
         {/* Navigation */}
@@ -337,7 +332,6 @@ export default function DashboardLayout({
       
       {/* Debug components */}
       <SocketDebugger />
-      <ServerDiagnostics />
     </div>
   );
 } 
