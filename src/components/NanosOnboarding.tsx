@@ -144,7 +144,7 @@ export default function NanosOnboarding() {
     try {
       setInstallationProgress(10);
       addLogMessage('> Installing lib32gcc-s1...');
-      const installLib32 = await executeCommand('sudo apt-get install -y lib32gcc-s1');
+      const installLib32 = await executeCommand('sudo apt-get install -y lib32gcc-s1 unzip');
       if (installLib32.error) {
         addLogMessage(`Error: ${installLib32.error}`);
         throw new Error(installLib32.error);

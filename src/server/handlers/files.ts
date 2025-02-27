@@ -486,4 +486,76 @@ router.post('/extract', async (req: RequestWithUser, res: Response): Promise<voi
   }
 });
 
+// Route to move a file or directory
+router.post('/move', async (req: RequestWithUser, res: Response): Promise<void> => {
+  try {
+    const { sourcePath, destinationPath } = req.body;
+    
+    if (!sourcePath || typeof sourcePath !== 'string') {
+      res.status(400).json({ success: false, error: 'Source path is required' });
+      return;
+    }
+    
+    if (!destinationPath || typeof destinationPath !== 'string') {
+      res.status(400).json({ success: false, error: 'Destination path is required' });
+      return;
+    }
+
+    // Security check to ensure we're only operating within allowed directories
+    if (!sourcePath.startsWith(NANOS_PACKAGES_PATH) && !sourcePath.startsWith(NANOS_ASSETS_PATH)) {
+      res.status(403).json({ success: false, error: 'Operation not allowed on source path' });
+      return;
+    }
+    
+    if (!destinationPath.startsWith(NANOS_PACKAGES_PATH) && !destinationPath.startsWith(NANOS_ASSETS_PATH)) {
+      res.status(403).json({ success: false, error: 'Operation not allowed on destination path' });
+      return;
+    }
+
+    // Check if source exists
+    try {
+      await fs.access(sourcePath);
+    } catch (error) {
+      res.status(404).json({ success: false, error: 'Source file or directory not found' });
+      return;
+    }
+
+    // Check if destination parent directory exists
+    const destinationDir = path.dirname(destinationPath);
+    try {
+      await fs.access(destinationDir);
+    } catch (error) {
+      // Create destination directory if it doesn't exist
+      await fs.mkdir(destinationDir, { recursive: true });
+    }
+
+    // Check if destination already exists
+    try {
+      await fs.access(destinationPath);
+      // If we got here, the destination exists
+      res.status(409).json({ success: false, error: 'Destination already exists' });
+      return;
+    } catch (error) {
+      // This is good, destination doesn't exist
+    }
+
+    // Use rename to move the file/directory
+    await fs.rename(sourcePath, destinationPath);
+    
+    console.log(`File/directory moved by ${req.user?.username || 'unknown user'}: ${sourcePath} -> ${destinationPath}`);
+    
+    res.json({
+      success: true,
+      sourcePath,
+      destinationPath
+    });
+  } catch (error) {
+    console.error('Error moving file:', (error as Error).message);
+    res.status(500).json({
+      success: false,
+      error: (error as Error).message
+    });
+  }
+});
+
 export default router; 
