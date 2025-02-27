@@ -553,30 +553,35 @@ export function configureSocketHandlers(io: Server): void {
     // Handle server command
     userSocket.on('server_command', async (command: string, callback: SocketCallback<ServerResponse>) => {
       try {
+        // Validate command
         if (!command || typeof command !== 'string') {
-          callback({ 
-            success: false, 
-            message: 'Invalid command'
+          return callback({
+            success: false,
+            error: 'Invalid command format'
           });
-          return;
         }
-        
-        console.log(`Server command request from ${userSocket.data.user.username}: ${command}`);
         
         // Check if server is running
-        const status = await checkServerStatus();
-        if (!status.running) {
-          callback({ 
-            success: false, 
-            message: 'Server is not running'
+        const serverStatus = await checkServerStatus();
+        if (!serverStatus.running) {
+          return callback({
+            success: false,
+            error: 'Server is not running'
           });
-          return;
         }
 
+        console.log(`[${userSocket.id}] Executing server command: ${command}`);
+        
         // Get current log file size before sending command
-        const beforeStats = await fsPromises.stat(NANOS_LOG_PATH);
-        const beforeSize = beforeStats.size;
-        console.log(`Log file size before command: ${beforeSize}`);
+        let beforeSize = 0;
+        try {
+          const beforeStats = await fsPromises.stat(NANOS_LOG_PATH);
+          beforeSize = beforeStats.size;
+          console.log(`Log file size before command: ${beforeSize} bytes`);
+        } catch (statError) {
+          console.error('Error getting log file size before command:', statError);
+          // Continue even if we can't get the file size
+        }
 
         // Send command via screen - prioritize this method for reliability
         let commandSent = false;
@@ -600,8 +605,8 @@ export function configureSocketHandlers(io: Server): void {
         }
 
         // Fall back method if screen is not available
-        if (!commandSent && status.pid) {
-          await execPromise(`echo "${command.replace(/"/g, '\\"')}" > /proc/${status.pid}/fd/0`);
+        if (!commandSent && serverStatus.pid) {
+          await execPromise(`echo "${command.replace(/"/g, '\\"')}" > /proc/${serverStatus.pid}/fd/0`);
           commandSent = true;
           
           // Send immediate callback to client
@@ -621,6 +626,7 @@ export function configureSocketHandlers(io: Server): void {
         // This ensures we capture the command output
         let retries = 0;
         const maxRetries = 20; // Try for up to 2 seconds (20 * 100ms)
+        
         const waitForLogs = async () => {
           try {
             const afterStats = await fsPromises.stat(NANOS_LOG_PATH);

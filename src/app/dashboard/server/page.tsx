@@ -425,7 +425,7 @@ export default function ServerPage() {
   };
 
   return (
-    <div className="container p-4">
+    <div className="container-fluid p-4 w-full max-w-none">
       <div className="flex items-center justify-between mb-6">
         <h1 className="text-2xl font-bold text-amber-300 font-mono">Server Management</h1>
         
@@ -564,13 +564,13 @@ export default function ServerPage() {
         {/* xterm.js Terminal */}
         <div className="relative">
           {isLoadingLogs && !terminalReady ? (
-            <div className="flex justify-center items-center h-96">
+            <div className="flex justify-center items-center h-120">
               <div className="h-8 w-8 animate-spin rounded-full border-4 border-amber-400 border-r-amber-400/30" />
             </div>
           ) : (
             <div 
               ref={terminalRef} 
-              className="w-full h-96 bg-black rounded border border-amber-500/20 overflow-hidden"
+              className="w-full h-120 bg-black rounded border border-amber-500/20 overflow-hidden"
             />
           )}
           
