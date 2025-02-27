@@ -862,8 +862,15 @@ export function SocketProvider({ children }: { children: ReactNode }) {
         reject(new Error('Log subscription request timed out'));
       }, 5000); // 5 seconds timeout instead of default
       
-      // Subscribe to logs with real-time option if available
-      socket.emit('subscribe_logs', options, (response: {
+      // Always enable realtime option for better responsiveness
+      const subscribeOptions = {
+        initialLines: options.initialLines || 50,
+        fullHistory: options.fullHistory || false,
+        realtime: true // Always use realtime mode
+      };
+      
+      // Subscribe to logs with real-time option
+      socket.emit('subscribe_logs', subscribeOptions, (response: {
         success: boolean;
         message?: string;
         error?: string;

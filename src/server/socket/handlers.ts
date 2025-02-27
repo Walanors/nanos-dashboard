@@ -572,11 +572,25 @@ export function configureSocketHandlers(io: Server): void {
           return;
         }
 
-        // Send command via screen
+        // Send command via screen - prioritize this method for reliability
         try {
           const { stdout } = await execPromise('screen -ls');
           if (stdout.includes('nanos-server')) {
-            await execPromise(`screen -S nanos-server -X stuff "${command.replace(/"/g, '\\"')}\\n"`);
+            // Ensure the command is properly escaped and has a newline
+            const escapedCommand = command.replace(/"/g, '\\"');
+            await execPromise(`screen -S nanos-server -X stuff "${escapedCommand}\\n"`);
+            
+            // Immediately trigger a log update to show command results faster
+            try {
+              const { stdout: logOutput } = await execPromise(`tail -n 20 ${NANOS_LOG_PATH}`);
+              userSocket.emit('log_data', {
+                type: 'update',
+                logs: logOutput.split('\n')
+              });
+            } catch (logError) {
+              console.error('Error fetching logs after command:', logError);
+            }
+            
             callback({ 
               success: true, 
               message: 'Command sent to server via screen'
@@ -584,12 +598,25 @@ export function configureSocketHandlers(io: Server): void {
             return;
           }
         } catch (screenError) {
+          console.error('Screen command error:', screenError);
           // Fall back to direct process input
         }
 
         // Fall back method if screen is not available
         if (status.pid) {
-          await execPromise(`echo "${command}" > /proc/${status.pid}/fd/0`);
+          await execPromise(`echo "${command.replace(/"/g, '\\"')}" > /proc/${status.pid}/fd/0`);
+          
+          // Immediately trigger a log update to show command results faster
+          try {
+            const { stdout: logOutput } = await execPromise(`tail -n 20 ${NANOS_LOG_PATH}`);
+            userSocket.emit('log_data', {
+              type: 'update',
+              logs: logOutput.split('\n')
+            });
+          } catch (logError) {
+            console.error('Error fetching logs after command:', logError);
+          }
+          
           callback({ 
             success: true, 
             message: 'Command sent to server'
@@ -612,10 +639,11 @@ export function configureSocketHandlers(io: Server): void {
     // Subscribe to server logs
     userSocket.on('subscribe_logs', async (options: { 
       initialLines?: number, 
-      fullHistory?: boolean 
+      fullHistory?: boolean,
+      realtime?: boolean
     } = {}, callback?: SocketCallback<ServerResponse>) => {
       try {
-        console.log(`Log subscription from ${userSocket.data.user.username}`);
+        console.log(`Log subscription from ${userSocket.data.user.username}`, options);
         
         // Close any existing watcher for this socket
         const existingWatcher = logWatchers.get(userSocket.id);
@@ -642,6 +670,7 @@ export function configureSocketHandlers(io: Server): void {
         // Default options
         const initialLines = options.initialLines || 100;
         const fullHistory = options.fullHistory || false;
+        const realtime = options.realtime !== undefined ? options.realtime : true; // Default to true for realtime
 
         // Send initial logs if requested
         if (initialLines > 0 || fullHistory) {
@@ -663,68 +692,116 @@ export function configureSocketHandlers(io: Server): void {
           }
         }
 
-        // Set up file watcher for real-time updates
-        try {
-          const watcher = watch(NANOS_LOG_PATH, (eventType, filename) => {
-            if (eventType === 'change') {
-              // File has changed, read the new content
-              // We'll use tail to just get the new lines since last read
-              execPromise(`tail -n 20 ${NANOS_LOG_PATH}`)
-                .then(({ stdout }) => {
+        // If realtime is enabled, use a more aggressive polling approach
+        if (realtime) {
+          console.log('Using realtime log updates for socket', userSocket.id);
+          
+          // Try file watcher first
+          try {
+            const watcher = watch(NANOS_LOG_PATH, { persistent: true }, (eventType, filename) => {
+              if (eventType === 'change') {
+                // File has changed, read the new content immediately
+                execPromise(`tail -n 20 ${NANOS_LOG_PATH}`)
+                  .then(({ stdout }) => {
+                    // Only emit if there's actual content
+                    if (stdout.trim()) {
+                      userSocket.emit('log_data', {
+                        type: 'update',
+                        logs: stdout.split('\n')
+                      });
+                    }
+                  })
+                  .catch(error => {
+                    console.error('Error reading updated log file:', error);
+                  });
+              }
+            });
+
+            // Store watcher reference for cleanup
+            logWatchers.set(userSocket.id, { watcher, tail: null });
+          } catch (watchError) {
+            console.error('Error setting up log file watcher:', watchError);
+            
+            // Fall back to more frequent polling
+            console.log('Falling back to frequent polling for log updates');
+            
+            let lastContent = '';
+            const pollInterval = setInterval(async () => {
+              try {
+                const { stdout } = await execPromise(`tail -n 50 ${NANOS_LOG_PATH}`);
+                if (stdout !== lastContent) {
+                  lastContent = stdout;
                   userSocket.emit('log_data', {
                     type: 'update',
                     logs: stdout.split('\n')
                   });
-                })
-                .catch(error => {
-                  console.error('Error reading updated log file:', error);
-                });
-            }
-          });
-
-          // Store watcher reference for cleanup
-          logWatchers.set(userSocket.id, { watcher, tail: null });
-
-          if (callback) {
-            callback({
-              success: true,
-              message: 'Subscribed to log updates'
-            });
-          }
-        } catch (watchError) {
-          console.error('Error setting up log file watcher:', watchError);
-          
-          // Fall back to polling if watching fails
-          console.log('Falling back to polling for log updates');
-          
-          let lastContent = '';
-          const pollInterval = setInterval(async () => {
-            try {
-              const { stdout } = await execPromise(`tail -n 50 ${NANOS_LOG_PATH}`);
-              if (stdout !== lastContent) {
-                lastContent = stdout;
-                userSocket.emit('log_data', {
-                  type: 'update',
-                  logs: stdout.split('\n')
-                });
+                }
+              } catch (pollError) {
+                console.error('Error polling log file:', pollError);
               }
-            } catch (pollError) {
-              console.error('Error polling log file:', pollError);
-            }
-          }, 2000); // Poll every 2 seconds
-          
-          // Store interval reference for cleanup
-          logWatchers.set(userSocket.id, { 
-            watcher: { close: () => clearInterval(pollInterval) } as CustomWatcher, 
-            tail: null 
-          });
-          
-          if (callback) {
-            callback({
-              success: true,
-              message: 'Subscribed to log updates (polling mode)'
+            }, 250); // Poll every 250ms for realtime mode
+            
+            // Store interval reference for cleanup
+            logWatchers.set(userSocket.id, { 
+              watcher: { close: () => clearInterval(pollInterval) } as CustomWatcher, 
+              tail: null 
             });
           }
+        } else {
+          // Standard (non-realtime) log watching with less frequent updates
+          try {
+            const watcher = watch(NANOS_LOG_PATH, (eventType, filename) => {
+              if (eventType === 'change') {
+                execPromise(`tail -n 20 ${NANOS_LOG_PATH}`)
+                  .then(({ stdout }) => {
+                    userSocket.emit('log_data', {
+                      type: 'update',
+                      logs: stdout.split('\n')
+                    });
+                  })
+                  .catch(error => {
+                    console.error('Error reading updated log file:', error);
+                  });
+              }
+            });
+
+            // Store watcher reference for cleanup
+            logWatchers.set(userSocket.id, { watcher, tail: null });
+          } catch (watchError) {
+            console.error('Error setting up log file watcher:', watchError);
+            
+            // Fall back to polling if watching fails
+            console.log('Falling back to polling for log updates');
+            
+            let lastContent = '';
+            const pollInterval = setInterval(async () => {
+              try {
+                const { stdout } = await execPromise(`tail -n 50 ${NANOS_LOG_PATH}`);
+                if (stdout !== lastContent) {
+                  lastContent = stdout;
+                  userSocket.emit('log_data', {
+                    type: 'update',
+                    logs: stdout.split('\n')
+                  });
+                }
+              } catch (pollError) {
+                console.error('Error polling log file:', pollError);
+              }
+            }, 500); // Poll every 500ms for standard mode
+            
+            // Store interval reference for cleanup
+            logWatchers.set(userSocket.id, { 
+              watcher: { close: () => clearInterval(pollInterval) } as CustomWatcher, 
+              tail: null 
+            });
+          }
+        }
+        
+        if (callback) {
+          callback({
+            success: true,
+            message: `Subscribed to log updates${realtime ? ' (realtime mode)' : ''}`
+          });
         }
       } catch (error) {
         console.error('Log subscription error:', error);
