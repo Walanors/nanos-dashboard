@@ -102,15 +102,16 @@ export default function ServerPage() {
           commandHistoryRef.current.push(currentCommand);
           commandIndexRef.current = commandHistoryRef.current.length;
           
-          // Execute command
+          // Execute command without showing "Executing:" message
           terminal.writeln('');
-          const cmdToExecute = currentCommand;
+          const cmdToExecute = currentCommand.trim(); // Store command before clearing
           currentCommand = '';
           
           // Use setTimeout to ensure the UI updates before executing the command
           setTimeout(() => {
+            console.log('Executing terminal command from onKey handler:', cmdToExecute);
             handleTerminalCommand(cmdToExecute);
-          }, 0);
+          }, 10);
         } else {
           // Just add a new line for empty command
           terminal.writeln('');
@@ -186,11 +187,7 @@ export default function ServerPage() {
     if (!cmd.trim()) return;
     
     try {
-      console.log('Terminal command entered:', cmd); // Debug log
-      
-      if (xtermRef.current) {
-        xtermRef.current.writeln(`\x1b[90mExecuting: ${cmd}\x1b[0m`);
-      }
+      console.log('Terminal command entered:', cmd); // Debug log only in console, not terminal
       
       // Check if server status is being loaded
       if (isLoadingServerStatus) {
@@ -228,13 +225,9 @@ export default function ServerPage() {
         const result = await sendServerCommand(cmd);
         console.log('Command result:', result); // Debug log
         
-        // Show prompt after command execution
+        // Don't show any success message, just restore the prompt
+        // The server's response will appear in the logs naturally
         if (xtermRef.current) {
-          if (result?.message) {
-            xtermRef.current.writeln(`\x1b[32m${result.message}\x1b[0m`);
-          } else {
-            xtermRef.current.writeln('\x1b[32mCommand executed successfully\x1b[0m');
-          }
           xtermRef.current.write('\x1b[33m$ \x1b[0m');
         }
       } catch (cmdError) {
@@ -272,10 +265,7 @@ export default function ServerPage() {
       })
         .then(() => {
           console.log('Successfully subscribed to server logs');
-          if (xtermRef.current) {
-            xtermRef.current.writeln('\x1b[32mConnected to server logs\x1b[0m');
-            xtermRef.current.write('\x1b[33m$ \x1b[0m');
-          }
+          // Don't show connection message in terminal
         })
         .catch((error: unknown) => {
           console.error('Failed to subscribe to logs:', error);
@@ -311,24 +301,27 @@ export default function ServerPage() {
         // Save current line content and cursor position
         const currentLine = xtermRef.current.buffer.active.getLine(xtermRef.current.buffer.active.cursorY)?.translateToString() || '';
         const cursorX = xtermRef.current.buffer.active.cursorX;
+        const hasCommandInProgress = currentLine.length > 2 && currentLine.startsWith('$ ');
+        const currentCommand = hasCommandInProgress ? currentLine.substring(2) : '';
         
-        // Clear current line
+        // Clear current line completely
         xtermRef.current.write('\x1b[2K\r');
         
-        // Write new logs
+        // Write new logs with proper line endings
         for (const log of newLogs) {
-          xtermRef.current.writeln(`\x1b[90m${log}\x1b[0m`);
+          // Ensure each log line is complete and properly terminated
+          const cleanLog = log.endsWith('\n') ? log : `${log}\n`;
+          xtermRef.current.write(`\x1b[90m${cleanLog}\x1b[0m`);
         }
         
         // Restore prompt and current command
         xtermRef.current.write('\x1b[33m$ \x1b[0m');
-        if (currentLine.length > 2) {
-          const command = currentLine.substring(2);
-          xtermRef.current.write(command);
+        if (hasCommandInProgress) {
+          xtermRef.current.write(currentCommand);
           
           // Try to restore cursor position if needed
           if (cursorX > 2 && cursorX < currentLine.length) {
-            const moveCursor = cursorX - (command.length + 2);
+            const moveCursor = cursorX - (currentCommand.length + 2);
             if (moveCursor < 0) {
               xtermRef.current.write(`\x1b[${Math.abs(moveCursor)}D`); // Move cursor left
             }
@@ -366,10 +359,7 @@ export default function ServerPage() {
       toast.success('Server started successfully');
       await fetchServerStatus();
       
-      if (xtermRef.current) {
-        xtermRef.current.writeln('\x1b[32mServer started successfully\x1b[0m');
-        xtermRef.current.write('\x1b[33m$ \x1b[0m');
-      }
+      // Don't show success message in terminal - it will appear in logs naturally
     } catch (error: unknown) {
       console.error('Failed to start server:', error);
       const errorMessage = error instanceof Error ? error.message : 'An unknown error occurred';
@@ -391,10 +381,7 @@ export default function ServerPage() {
       toast.success('Server stopped successfully');
       await fetchServerStatus();
       
-      if (xtermRef.current) {
-        xtermRef.current.writeln('\x1b[33mServer stopped successfully\x1b[0m');
-        xtermRef.current.write('\x1b[33m$ \x1b[0m');
-      }
+      // Don't show success message in terminal - it will appear in logs naturally
     } catch (error: unknown) {
       console.error('Failed to stop server:', error);
       const errorMessage = error instanceof Error ? error.message : 'An unknown error occurred';
@@ -544,12 +531,12 @@ export default function ServerPage() {
               onClick={() => {
                 unsubscribeFromLogs();
                 // Use a smaller batch size for more frequent updates
-                subscribeToLogs({ initialLines: 50 });
+                subscribeToLogs({ 
+                  initialLines: 50,
+                  realtime: true 
+                });
                 
-                if (xtermRef.current) {
-                  xtermRef.current.writeln('\x1b[33mRefreshing logs...\x1b[0m');
-                  xtermRef.current.write('\x1b[33m$ \x1b[0m');
-                }
+                // Don't show refresh message in terminal
               }}
               disabled={isLoadingLogs}
             >
@@ -574,13 +561,13 @@ export default function ServerPage() {
         {/* xterm.js Terminal */}
         <div className="relative">
           {isLoadingLogs && !terminalReady ? (
-            <div className="flex justify-center items-center h-80">
+            <div className="flex justify-center items-center h-96">
               <div className="h-8 w-8 animate-spin rounded-full border-4 border-amber-400 border-r-amber-400/30" />
             </div>
           ) : (
             <div 
               ref={terminalRef} 
-              className="w-full h-80 bg-black rounded border border-amber-500/20 overflow-hidden"
+              className="w-full h-96 bg-black rounded border border-amber-500/20 overflow-hidden"
             />
           )}
           

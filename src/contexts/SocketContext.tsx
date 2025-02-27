@@ -565,41 +565,67 @@ export function SocketProvider({ children }: { children: ReactNode }) {
   const fetchServerStatus = useCallback((): Promise<ServerStatus> => {
     return new Promise((resolve, reject) => {
       if (!socket || !connectionState.connected) {
+        console.error('Cannot fetch server status: Socket not connected');
         reject(new Error('Socket not connected'));
         return;
       }
       
       setIsLoadingServerStatus(true);
+      console.log('Fetching server status...');
       
+      // Set a timeout for the server status request
       const timeoutId = setTimeout(() => {
         setIsLoadingServerStatus(false);
+        console.error('Server status request timed out');
         reject(new Error('Server status request timed out'));
       }, 10000);
       
-      socket.emit('server_status', (response: { 
-        success: boolean;
-        running?: boolean;
-        pid?: number;
-        uptime?: number;
-        configPath?: string;
-        error?: string;
-      }) => {
-        clearTimeout(timeoutId);
-        setIsLoadingServerStatus(false);
-        
-        if (response.success) {
-          const status: ServerStatus = {
-            running: !!response.running,
-            pid: response.pid,
-            uptime: response.uptime,
-            configPath: response.configPath
-          };
-          setServerStatus(status);
-          resolve(status);
-        } else {
-          reject(new Error(response.error || 'Failed to get server status'));
-        }
-      });
+      // Add retry mechanism for more reliability
+      let retryCount = 0;
+      const maxRetries = 2;
+      
+      const attemptFetchStatus = () => {
+        socket.emit('server_status', (response: { 
+          success: boolean;
+          running?: boolean;
+          pid?: number;
+          uptime?: number;
+          configPath?: string;
+          error?: string;
+        }) => {
+          console.log('Server status response:', response);
+          
+          if (response.success) {
+            clearTimeout(timeoutId);
+            setIsLoadingServerStatus(false);
+            
+            const status: ServerStatus = {
+              running: !!response.running,
+              pid: response.pid,
+              uptime: response.uptime,
+              configPath: response.configPath
+            };
+            
+            console.log('Setting server status:', status);
+            setServerStatus(status);
+            resolve(status);
+          } else if (retryCount < maxRetries) {
+            // Retry on failure
+            retryCount++;
+            console.log(`Server status request failed, retrying (${retryCount}/${maxRetries})...`);
+            setTimeout(attemptFetchStatus, 1000);
+          } else {
+            // Give up after max retries
+            clearTimeout(timeoutId);
+            setIsLoadingServerStatus(false);
+            console.error('Failed to get server status after retries:', response.error);
+            reject(new Error(response.error || 'Failed to get server status'));
+          }
+        });
+      };
+      
+      // Start the first attempt
+      attemptFetchStatus();
     });
   }, [socket, connectionState.connected]);
   
@@ -780,14 +806,32 @@ export function SocketProvider({ children }: { children: ReactNode }) {
   const handleLogData = useCallback((data: LogData) => {
     if (!data || !data.logs) return;
     
+    // Process log data to ensure complete lines and filter out command execution messages
+    const processedLogs = data.logs
+      .filter(Boolean)
+      .filter(log => {
+        // Filter out command execution messages
+        const lowerLog = log.toLowerCase();
+        return !(
+          lowerLog.includes('executing:') || 
+          lowerLog.includes('command sent to server') ||
+          lowerLog.includes('command executed successfully')
+        );
+      })
+      .map(log => {
+        // Clean up log entries to ensure consistent formatting
+        const trimmedLog = log.trim();
+        return trimmedLog;
+      });
+    
     setLogs(prevLogs => {
       if (data.type === 'initial') {
         // Replace logs with initial data
-        return data.logs.filter(Boolean);
+        return processedLogs;
       }
       
       // Add new logs while respecting the max limit
-      const newLogs = [...prevLogs, ...data.logs.filter(Boolean)];
+      const newLogs = [...prevLogs, ...processedLogs];
       return newLogs.slice(-maxLogLines);
     });
   }, []);
