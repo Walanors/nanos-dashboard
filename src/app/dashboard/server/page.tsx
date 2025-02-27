@@ -30,14 +30,17 @@ export default function ServerPage() {
   const [isStoppingServer, setIsStoppingServer] = useState(false);
   const [isSendingCommand, setIsSendingCommand] = useState(false);
   const terminalRef = useRef<HTMLDivElement>(null);
+  const logsLengthRef = useRef(logs.length);
 
   // Auto-scroll to bottom of terminal when new entries are added
   useEffect(() => {
-    if (terminalRef.current) {
+    // Only scroll if logs length has increased
+    if (logs.length > logsLengthRef.current && terminalRef.current) {
       terminalRef.current.scrollIntoView({ behavior: 'smooth' });
     }
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, []); // We only need this to run once when logs update
+    // Update the ref with current logs length
+    logsLengthRef.current = logs.length;
+  }, [logs.length]);
 
   // Subscribe to logs when component mounts
   useEffect(() => {
@@ -177,7 +180,7 @@ export default function ServerPage() {
           <h2 className="text-xl font-semibold text-amber-300 font-mono">Server Status</h2>
         </div>
         
-        <div className="grid grid-cols-1 md:grid-cols-4 gap-4 mb-6">
+        <div className="grid grid-cols-1 md:grid-cols-2 gap-4 mb-6">
           <div>
             <p className="text-sm font-mono text-amber-400/70 mb-1">Status</p>
             <p className="text-lg font-bold">
@@ -195,23 +198,9 @@ export default function ServerPage() {
           </div>
           
           <div>
-            <p className="text-sm font-mono text-amber-400/70 mb-1">Process ID</p>
-            <p className="text-lg font-bold text-amber-300">
-              {serverStatus?.pid || 'N/A'}
-            </p>
-          </div>
-          
-          <div>
             <p className="text-sm font-mono text-amber-400/70 mb-1">Uptime</p>
             <p className="text-lg font-bold text-amber-300">
               {serverStatus?.running ? formatUptime(serverStatus.uptime) : 'N/A'}
-            </p>
-          </div>
-          
-          <div>
-            <p className="text-sm font-mono text-amber-400/70 mb-1">Config Path</p>
-            <p className="text-lg font-bold truncate max-w-xs text-amber-300" title={serverStatus?.configPath}>
-              {serverStatus?.configPath || 'N/A'}
             </p>
           </div>
         </div>
