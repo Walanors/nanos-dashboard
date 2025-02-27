@@ -492,6 +492,38 @@ export default function FileManager() {
            lowerName.endsWith('.tgz');
   };
   
+  // Handle checkbox selection
+  const handleCheckboxSelect = (filePath: string, event: React.ChangeEvent<HTMLInputElement>) => {
+    event.stopPropagation();
+    
+    const newSelectedFiles = new Set(selectedFiles);
+    
+    if (event.target.checked) {
+      newSelectedFiles.add(filePath);
+    } else {
+      newSelectedFiles.delete(filePath);
+    }
+    
+    setSelectedFiles(newSelectedFiles);
+  };
+
+  // Toggle all checkboxes
+  const handleSelectAll = (event: React.ChangeEvent<HTMLInputElement>) => {
+    if (event.target.checked) {
+      // Select all files
+      const allFilePaths = files.map(file => file.path);
+      setSelectedFiles(new Set(allFilePaths));
+    } else {
+      // Deselect all files
+      setSelectedFiles(new Set());
+    }
+  };
+
+  // Check if all files are selected
+  const areAllSelected = useMemo(() => {
+    return files.length > 0 && selectedFiles.size === files.length;
+  }, [files, selectedFiles]);
+  
   // Initialize component - load directory contents when tab changes
   useEffect(() => {
     loadDirectoryContents();
@@ -610,6 +642,64 @@ export default function FileManager() {
             )}
             Move Up
           </button>
+          
+          {/* Delete Selected Button */}
+          {selectedFiles.size > 0 && (
+            <button
+              type="button"
+              onClick={() => {
+                if (confirm(`Are you sure you want to delete ${selectedFiles.size} selected item${selectedFiles.size !== 1 ? 's' : ''}?`)) {
+                  // Create a copy to avoid mutation during iteration
+                  const filesToDelete = Array.from(selectedFiles);
+                  
+                  // Sequential deletion to avoid overwhelming the server
+                  const deleteNext = async (index: number) => {
+                    if (index >= filesToDelete.length) {
+                      toast.success('All selected items deleted');
+                      loadDirectoryContents(currentPath);
+                      return;
+                    }
+                    
+                    const filePath = filesToDelete[index];
+                    const fileObj = files.find(f => f.path === filePath);
+                    
+                    if (!fileObj) {
+                      deleteNext(index + 1);
+                      return;
+                    }
+                    
+                    try {
+                      const response = await fetch(`/api/files/delete?path=${encodeURIComponent(filePath)}`, {
+                        method: 'DELETE',
+                        headers: {
+                          ...getAuthHeader(),
+                        },
+                      });
+                      
+                      if (!response.ok) {
+                        throw new Error(`Failed to delete: ${response.statusText}`);
+                      }
+                      
+                      await response.json();
+                      deleteNext(index + 1);
+                    } catch (error) {
+                      toast.error(`Error deleting ${fileObj.name}: ${(error as Error).message}`);
+                      deleteNext(index + 1);
+                    }
+                  };
+                  
+                  deleteNext(0);
+                }
+              }}
+              className="px-3 py-1 bg-red-900/20 text-red-400 rounded-md hover:bg-red-900/30 transition-colors font-mono text-xs flex items-center"
+            >
+              <svg xmlns="http://www.w3.org/2000/svg" className="h-3 w-3 mr-1" viewBox="0 0 20 20" fill="currentColor" aria-labelledby="delete-selected-icon">
+                <title id="delete-selected-icon">Delete Selected</title>
+                <path fillRule="evenodd" d="M9 2a1 1 0 00-.894.553L7.382 4H4a1 1 0 000 2v10a2 2 0 002 2h8a2 2 0 002-2V6a1 1 0 100-2h-3.382l-.724-1.447A1 1 0 0011 2H9zM7 8a1 1 0 012 0v6a1 1 0 11-2 0V8zm5-1a1 1 0 00-1 1v6a1 1 0 102 0V8a1 1 0 00-1-1z" clipRule="evenodd" />
+              </svg>
+              Delete Selected
+            </button>
+          )}
         </div>
         
         {/* Selection Counter */}
@@ -625,6 +715,19 @@ export default function FileManager() {
         <table className="w-full font-mono text-sm">
           <thead className="text-left">
             <tr className="border-b border-amber-500/20">
+              <th className="pb-2 w-6">
+                {files.length > 0 && (
+                  <div className="flex items-center">
+                    <input
+                      type="checkbox"
+                      id="select-all"
+                      checked={areAllSelected}
+                      onChange={handleSelectAll}
+                      className="w-4 h-4 bg-transparent border border-amber-500/40 rounded text-amber-500 focus:ring-amber-500/30"
+                    />
+                  </div>
+                )}
+              </th>
               <th className="pb-2 text-amber-300 font-normal">Name</th>
               <th className="pb-2 text-amber-300 font-normal">Size</th>
               <th className="pb-2 text-amber-300 font-normal">Modified</th>
@@ -634,7 +737,7 @@ export default function FileManager() {
           <tbody>
             {isLoading ? (
               <tr>
-                <td colSpan={4} className="py-4 text-center text-amber-400/70">
+                <td colSpan={5} className="py-4 text-center text-amber-400/70">
                   <div className="flex justify-center items-center">
                     <div className="h-5 w-5 animate-spin rounded-full border-t-2 border-amber-400 border-r-2 border-amber-400/30 mr-2" />
                     Loading...
@@ -643,7 +746,7 @@ export default function FileManager() {
               </tr>
             ) : files.length === 0 && breadcrumbs.length <= 1 ? (
               <tr>
-                <td colSpan={4} className="py-4 text-center text-amber-400/70">
+                <td colSpan={5} className="py-4 text-center text-amber-400/70">
                   No files found in this directory
                 </td>
               </tr>
@@ -652,6 +755,7 @@ export default function FileManager() {
                 {/* Parent Directory Entry (..) - only show when not in root directory */}
                 {breadcrumbs.length > 1 && (
                   <tr className="border-b border-amber-500/10 hover:bg-amber-500/5">
+                    <td className="py-2" />
                     <td className="py-2">
                       <button
                         type="button"
@@ -689,6 +793,16 @@ export default function FileManager() {
                     draggable
                     onDragStart={handleDragStart(file)}
                   >
+                    <td className="py-2 pl-2">
+                      <input
+                        type="checkbox"
+                        checked={isSelected(file.path)}
+                        onChange={(e) => handleCheckboxSelect(file.path, e)}
+                        onClick={(e) => e.stopPropagation()}
+                        className="w-4 h-4 bg-transparent border border-amber-500/40 rounded text-amber-500 focus:ring-amber-500/30"
+                        aria-label={`Select ${file.name}`}
+                      />
+                    </td>
                     <td className="py-2">
                       {file.isDirectory ? (
                         <button
