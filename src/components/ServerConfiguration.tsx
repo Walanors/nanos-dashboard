@@ -3,7 +3,7 @@
 import { useState, useEffect, useCallback } from 'react';
 import { useSocket } from '@/hooks/useSocket';
 import { NANOS_INSTALL_DIR } from './NanosOnboarding';
-import * as TOML from '@iarna/toml';
+import toml from 'toml';
 import { toast } from 'react-hot-toast';
 
 // Define the type for the TOML parser output
@@ -151,7 +151,7 @@ export default function ServerConfiguration() {
 
       try {
         // Parse TOML content with explicit type casting
-        const rawParsedConfig = TOML.parse(configContent) as TomlTable;
+        const rawParsedConfig = toml.parse(configContent) as TomlTable;
         const parsedConfig: ParsedTomlConfig = {
           discover: rawParsedConfig.discover ? {
             name: String(rawParsedConfig.discover.name || ''),

@@ -28,6 +28,7 @@
     "react-hot-toast": "^2.5.2",
     "socket.io": "^4.8.1",
     "socket.io-client": "^4.8.1",
+    "toml": "^3.0.0",
     "ts-node": "^10.9.1",
     "typescript": "^5.0.4"
   },
