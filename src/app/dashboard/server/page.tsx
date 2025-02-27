@@ -221,6 +221,9 @@ export default function ServerPage() {
       console.log('Sending command to server:', cmd); // Debug log
       setIsSendingCommand(true);
       
+      // Clear logs length reference to force update after command
+      logsLengthRef.current = 0;
+      
       try {
         const result = await sendServerCommand(cmd);
         console.log('Command result:', result); // Debug log

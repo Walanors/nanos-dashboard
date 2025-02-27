@@ -820,8 +820,7 @@ export function SocketProvider({ children }: { children: ReactNode }) {
       })
       .map(log => {
         // Clean up log entries to ensure consistent formatting
-        const trimmedLog = log.trim();
-        return trimmedLog;
+        return log.trim();
       });
     
     // Only update if we have logs to add
@@ -834,11 +833,26 @@ export function SocketProvider({ children }: { children: ReactNode }) {
         return processedLogs;
       }
       
-      // For incremental updates, only add new logs
-      console.log(`Adding ${processedLogs.length} new log entries`);
+      // For incremental updates, check for duplicates
+      console.log(`Processing ${processedLogs.length} new log entries`);
+      
+      // Get the last few logs to check for duplicates
+      const lastLogs = prevLogs.slice(-10);
+      
+      // Filter out any logs that are exact duplicates of recent logs
+      const uniqueNewLogs = processedLogs.filter(newLog => {
+        return !lastLogs.some(existingLog => existingLog === newLog);
+      });
+      
+      if (uniqueNewLogs.length === 0) {
+        console.log('All new logs were duplicates, not updating');
+        return prevLogs;
+      }
+      
+      console.log(`Adding ${uniqueNewLogs.length} unique new log entries`);
       
       // Add new logs while respecting the max limit
-      const newLogs = [...prevLogs, ...processedLogs];
+      const newLogs = [...prevLogs, ...uniqueNewLogs];
       return newLogs.slice(-maxLogLines);
     });
   }, []);

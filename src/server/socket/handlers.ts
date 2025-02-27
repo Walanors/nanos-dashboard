@@ -573,30 +573,26 @@ export function configureSocketHandlers(io: Server): void {
           return;
         }
 
+        // Get current log file size before sending command
+        const beforeStats = await fsPromises.stat(NANOS_LOG_PATH);
+        const beforeSize = beforeStats.size;
+        console.log(`Log file size before command: ${beforeSize}`);
+
         // Send command via screen - prioritize this method for reliability
+        let commandSent = false;
         try {
           const { stdout } = await execPromise('screen -ls');
           if (stdout.includes('nanos-server')) {
             // Ensure the command is properly escaped and has a newline
             const escapedCommand = command.replace(/"/g, '\\"');
             await execPromise(`screen -S nanos-server -X stuff "${escapedCommand}\\n"`);
+            commandSent = true;
             
-            // Immediately trigger a log update to show command results faster
-            try {
-              const { stdout: logOutput } = await execPromise(`tail -n 20 ${NANOS_LOG_PATH}`);
-              userSocket.emit('log_data', {
-                type: 'update',
-                logs: logOutput.split('\n')
-              });
-            } catch (logError) {
-              console.error('Error fetching logs after command:', logError);
-            }
-            
+            // Send immediate callback to client
             callback({ 
               success: true, 
               message: 'Command sent to server via screen'
             });
-            return;
           }
         } catch (screenError) {
           console.error('Screen command error:', screenError);
@@ -604,30 +600,81 @@ export function configureSocketHandlers(io: Server): void {
         }
 
         // Fall back method if screen is not available
-        if (status.pid) {
+        if (!commandSent && status.pid) {
           await execPromise(`echo "${command.replace(/"/g, '\\"')}" > /proc/${status.pid}/fd/0`);
+          commandSent = true;
           
-          // Immediately trigger a log update to show command results faster
-          try {
-            const { stdout: logOutput } = await execPromise(`tail -n 20 ${NANOS_LOG_PATH}`);
-            userSocket.emit('log_data', {
-              type: 'update',
-              logs: logOutput.split('\n')
-            });
-          } catch (logError) {
-            console.error('Error fetching logs after command:', logError);
-          }
-          
+          // Send immediate callback to client
           callback({ 
             success: true, 
             message: 'Command sent to server'
           });
-        } else {
+        } else if (!commandSent) {
           callback({ 
             success: false, 
             message: 'Could not determine server PID'
           });
+          return;
         }
+
+        // Wait for log file to change after sending command
+        // This ensures we capture the command output
+        let retries = 0;
+        const maxRetries = 20; // Try for up to 2 seconds (20 * 100ms)
+        const waitForLogs = async () => {
+          try {
+            const afterStats = await fsPromises.stat(NANOS_LOG_PATH);
+            console.log(`Log file size after command (attempt ${retries+1}): ${afterStats.size}`);
+            
+            // If log file has grown, read the new content
+            if (afterStats.size > beforeSize) {
+              // Read only the new content
+              const fileHandle = await fsPromises.open(NANOS_LOG_PATH, 'r');
+              const buffer = Buffer.alloc(afterStats.size - beforeSize);
+              
+              await fileHandle.read(buffer, 0, buffer.length, beforeSize);
+              await fileHandle.close();
+              
+              // Convert buffer to string and split into lines
+              const content = buffer.toString();
+              if (content.trim()) {
+                const lines = content.split('\n').filter(Boolean);
+                if (lines.length > 0) {
+                  console.log(`Sending ${lines.length} new log lines after command`);
+                  userSocket.emit('log_data', {
+                    type: 'update',
+                    logs: lines
+                  });
+                  return; // Successfully sent logs
+                }
+              }
+            }
+            
+            // If we haven't found new logs yet and haven't exceeded max retries
+            if (retries < maxRetries) {
+              retries++;
+              // Wait 100ms before checking again
+              setTimeout(waitForLogs, 100);
+            } else {
+              console.log('No new logs detected after command execution');
+              // Even if no new logs, send a final check with tail
+              try {
+                const { stdout: logOutput } = await execPromise(`tail -n 10 ${NANOS_LOG_PATH}`);
+                userSocket.emit('log_data', {
+                  type: 'update',
+                  logs: logOutput.split('\n')
+                });
+              } catch (logError) {
+                console.error('Error fetching logs after command:', logError);
+              }
+            }
+          } catch (error) {
+            console.error('Error checking for new logs:', error);
+          }
+        };
+        
+        // Start waiting for logs
+        waitForLogs();
       } catch (error) {
         console.error('Server command error:', error);
         callback({
