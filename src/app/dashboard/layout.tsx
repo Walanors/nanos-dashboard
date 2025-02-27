@@ -307,6 +307,28 @@ export default function DashboardLayout({
               </div>
             )}
           </div>
+          
+          {/* Disk Usage */}
+          <div className="mb-3">
+            <div className="flex justify-between text-xs text-amber-400/90 mb-1">
+              <span>Disk</span>
+              <span>{metrics ? Math.round(metrics.disk.usedPercent) : 0}%</span>
+            </div>
+            <div className="h-1.5 bg-zinc-800 rounded-full overflow-hidden">
+              <div 
+                className={`h-full ${
+                  metrics && metrics.disk.usedPercent > 90 ? 'bg-red-500' : 
+                  metrics && metrics.disk.usedPercent > 70 ? 'bg-amber-500' : 'bg-green-500'
+                }`}
+                style={{ width: `${metrics ? metrics.disk.usedPercent : 0}%` }}
+              />
+            </div>
+            {metrics && (
+              <div className="text-[10px] text-amber-400/60 mt-1 text-right">
+                {formatBytes(metrics.disk.used)} / {formatBytes(metrics.disk.total)}
+              </div>
+            )}
+          </div>
         </div>
 
         {/* Logout button */}

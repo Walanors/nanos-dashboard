@@ -222,6 +222,12 @@ interface SystemMetrics {
     cores: number;
     usage: number;
   };
+  disk: {
+    total: number;
+    free: number;
+    used: number;
+    usedPercent: number;
+  };
   version: {
     current: string;
     latest: string | null;
@@ -247,6 +253,29 @@ async function getSystemMetrics(): Promise<SystemMetrics> {
   
   // Get version information
   const versionInfo = await checkForUpdates();
+
+  // Get disk usage information for root directory
+  let diskInfo = {
+    total: 0,
+    free: 0,
+    used: 0,
+    usedPercent: 0
+  };
+
+  try {
+    // Using node-os-utils to get disk info
+    const drive = osUtils.drive;
+    const diskData = await drive.info('/');
+    
+    diskInfo = {
+      total: Number(diskData.totalGb) * 1024 * 1024 * 1024, // Convert GB to bytes
+      free: Number(diskData.freeGb) * 1024 * 1024 * 1024,
+      used: (Number(diskData.totalGb) - Number(diskData.freeGb)) * 1024 * 1024 * 1024,
+      usedPercent: Number(diskData.usedPercentage)
+    };
+  } catch (error) {
+    console.error('Error getting disk info:', error);
+  }
   
   return {
     uptime: os.uptime(),
@@ -261,6 +290,7 @@ async function getSystemMetrics(): Promise<SystemMetrics> {
       cores: os.cpus().length,
       usage: cpuUsage
     },
+    disk: diskInfo,
     version: versionInfo,
     timestamp: Date.now()
   };

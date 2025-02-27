@@ -17,6 +17,12 @@ interface SystemMetrics {
     cores: number;
     usage: number;
   };
+  disk: {
+    total: number;
+    free: number;
+    used: number;
+    usedPercent: number;
+  };
   version: {
     current: string;
     latest: string | null;
