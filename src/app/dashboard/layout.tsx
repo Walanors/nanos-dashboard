@@ -6,6 +6,9 @@ import { usePathname, useRouter } from 'next/navigation';
 import { useSocket } from '@/hooks/useSocket';
 import { useUser } from '@/hooks/useUser';
 import NanosOnboarding from '@/components/NanosOnboarding';
+import ConnectionStatus from '@/components/ConnectionStatus';
+import SocketDebugger from '@/components/SocketDebugger';
+import ServerDiagnostics from '@/components/ServerDiagnostics';
 import { toast } from 'react-hot-toast';
 
 export default function DashboardLayout({
@@ -15,11 +18,11 @@ export default function DashboardLayout({
 }) {
   const router = useRouter();
   const pathname = usePathname();
-  const { metrics } = useSocket();
+  const socketContext = useSocket();
+  const { metrics, isConnected, connectionError, reconnect, executeCommand } = socketContext;
   const [activeMenu, setActiveMenu] = useState<string>('');
   const { userData, loading: userLoading } = useUser();
   const [isUpdating, setIsUpdating] = useState(false);
-  const { executeCommand } = useSocket();
 
   // Format bytes to human-readable size
   const formatBytes = (bytes: number): string => {
@@ -125,6 +128,9 @@ export default function DashboardLayout({
             <div className="ml-2 text-xs text-amber-400/50 font-mono self-end">
               DASHBOARD
             </div>
+          </div>
+          <div className="mt-2">
+            <ConnectionStatus />
           </div>
         </div>
 
@@ -255,6 +261,10 @@ export default function DashboardLayout({
       <div className="flex-1 overflow-hidden">
         {children}
       </div>
+      
+      {/* Debug components */}
+      <SocketDebugger />
+      <ServerDiagnostics />
     </div>
   );
 } 

@@ -222,6 +222,14 @@ export function configureSocketHandlers(io: Server): void {
       }
     });
 
+    // Handle ping for connection health checks
+    userSocket.on('ping', (data, callback) => {
+      // Simply respond to confirm connection is alive
+      if (typeof callback === 'function') {
+        callback({ success: true, timestamp: Date.now() });
+      }
+    });
+
     // Handle file reading
     userSocket.on('read_file', async (filePath: string, callback: SocketCallback<FileResponse>) => {
       try {

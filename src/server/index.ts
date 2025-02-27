@@ -11,6 +11,7 @@ import helmet from 'helmet';
 import dotenv from 'dotenv';
 import type { Server as HttpServer } from 'node:http';
 import type { Server as HttpsServer } from 'node:https';
+import * as os from 'node:os';
 
 // Load environment variables
 dotenv.config();
@@ -149,6 +150,20 @@ app.prepare().then(() => {
   }));
   
   server.use(express.json());
+  
+  // Simple ping endpoint for diagnostics
+  server.get('/api/system/ping', authenticate, (req, res) => {
+    console.log('Ping request received');
+    res.json({
+      status: 'ok',
+      timestamp: Date.now(),
+      server: {
+        hostname: os.hostname(),
+        platform: os.platform(),
+        uptime: os.uptime()
+      }
+    });
+  });
   
   // API Routes - these bypass Next.js for system operations
   server.use('/api/commands', authenticate, commandRouter);

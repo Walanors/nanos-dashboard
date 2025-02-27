@@ -1,5 +1,5 @@
 {
-  "latest_version": "1.1.3-dev",
+  "latest_version": "1.1.4-dev",
   "repository_url": "https://github.com/Walanors/nanos-dashboard.git",
   "changelog": "- fix layout",
   "required": false
