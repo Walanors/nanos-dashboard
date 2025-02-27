@@ -751,8 +751,9 @@ export function configureSocketHandlers(io: Server): void {
         console.log('Setting up real-time log streaming for socket', userSocket.id);
         
         try {
-          // Store the last line to prevent duplicates
-          let lastLine = '';
+          // Store recent lines to prevent duplicates - using a Set for efficient lookups
+          const recentLines = new Set<string>();
+          const MAX_RECENT_LINES = 100;
           
           // Use tail -f for true streaming with line buffering (-n 0 to avoid repeating lines)
           // Adding --follow=name to handle log rotation better
@@ -777,13 +778,28 @@ export function configureSocketHandlers(io: Server): void {
               // Filter out empty lines and duplicates
               const uniqueLines = lines
                 .filter(line => line.trim().length > 0) // Filter empty lines
-                .filter(line => line !== lastLine);     // Filter out immediate duplicates
+                .filter(line => {
+                  // More sophisticated duplicate detection
+                  if (recentLines.has(line)) return false;
+                  
+                  // Add to recent lines cache
+                  recentLines.add(line);
+                  
+                  // Keep the Set size limited
+                  if (recentLines.size > MAX_RECENT_LINES) {
+                    // Remove oldest lines when set gets too big (approximate FIFO)
+                    const iterator = recentLines.values();
+                    const firstValue = iterator.next().value;
+                    if (firstValue !== undefined) {
+                      recentLines.delete(firstValue);
+                    }
+                  }
+                  
+                  return true;
+                });
               
               // Only emit if we have unique complete lines
               if (uniqueLines.length > 0) {
-                // Update the last line to prevent duplicates
-                lastLine = uniqueLines[uniqueLines.length - 1];
-                
                 userSocket.emit('log_data', {
                   type: 'update',
                   logs: uniqueLines

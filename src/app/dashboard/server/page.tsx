@@ -298,17 +298,22 @@ export default function ServerPage() {
       const newLogs = logs.slice(lastLogIndex);
       
       if (newLogs.length > 0) {
+        console.log(`Processing ${newLogs.length} new log lines`);
+        
         // Save current line content and cursor position
         const currentLine = xtermRef.current.buffer.active.getLine(xtermRef.current.buffer.active.cursorY)?.translateToString() || '';
         const cursorX = xtermRef.current.buffer.active.cursorX;
-        const hasCommandInProgress = currentLine.length > 2 && currentLine.startsWith('$ ');
-        const currentCommand = hasCommandInProgress ? currentLine.substring(2) : '';
+        const hasCommandInProgress = currentLine.includes('$ ');
+        const promptIndex = currentLine.indexOf('$ ');
+        const currentCommand = hasCommandInProgress && promptIndex >= 0 ? currentLine.substring(promptIndex + 2) : '';
         
         // Clear current line completely
         xtermRef.current.write('\x1b[2K\r');
         
         // Write new logs with proper line endings
         for (const log of newLogs) {
+          if (!log.trim()) continue; // Skip empty lines
+          
           // Ensure each log line is complete and properly terminated
           const cleanLog = log.endsWith('\n') ? log : `${log}\n`;
           xtermRef.current.write(`\x1b[90m${cleanLog}\x1b[0m`);
@@ -316,7 +321,7 @@ export default function ServerPage() {
         
         // Restore prompt and current command
         xtermRef.current.write('\x1b[33m$ \x1b[0m');
-        if (hasCommandInProgress) {
+        if (hasCommandInProgress && currentCommand.trim()) {
           xtermRef.current.write(currentCommand);
           
           // Try to restore cursor position if needed
