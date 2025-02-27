@@ -188,8 +188,8 @@ export default function DashboardLayout({
   // Regular dashboard layout
   return (
     <div className="flex min-h-screen bg-gradient-to-br from-black to-zinc-900 text-amber-50">
-      {/* Sidebar */}
-      <div className="w-64 border-r border-amber-500/20 backdrop-blur-sm backdrop-filter bg-black/60 flex flex-col">
+      {/* Sidebar - fixed */}
+      <div className="w-64 border-r border-amber-500/20 backdrop-blur-sm backdrop-filter bg-black/60 flex flex-col h-screen sticky top-0">
         {/* Logo area */}
         <div className="p-4 border-b border-amber-500/20">
           <div className="flex items-center">
@@ -322,8 +322,8 @@ export default function DashboardLayout({
         </div>
       </div>
 
-      {/* Main content */}
-      <div className="flex-1 overflow-hidden">
+      {/* Main content - scrollable */}
+      <div className="flex-1 overflow-y-auto overflow-x-hidden max-h-screen">
         {children}
       </div>
       

@@ -4,6 +4,8 @@ import { useState, useEffect, useCallback } from 'react';
 import { useSocket } from '@/hooks/useSocket';
 import { NANOS_INSTALL_DIR } from './NanosOnboarding';
 import { toast } from 'react-hot-toast';
+import Select from 'react-select';
+import type { MultiValue, StylesConfig } from 'react-select';
 
 // Define types for file listing
 interface FileEntry {
@@ -13,6 +15,114 @@ interface FileEntry {
   size: number;
   modified: Date;
 }
+
+// Define option type for select components
+interface SelectOption {
+  value: string;
+  label: string;
+}
+
+// Define the custom styles for React Select to match our design
+const selectStyles: StylesConfig<SelectOption, true> = {
+  control: (styles) => ({
+    ...styles,
+    backgroundColor: 'rgba(0, 0, 0, 0.3)',
+    borderColor: 'rgba(245, 158, 11, 0.2)',
+    '&:hover': {
+      borderColor: 'rgba(245, 158, 11, 0.4)'
+    },
+    boxShadow: 'none',
+    padding: '2px',
+    minHeight: '38px',
+    fontFamily: 'monospace'
+  }),
+  option: (styles, { isSelected, isFocused }) => ({
+    ...styles,
+    backgroundColor: isSelected 
+      ? 'rgba(245, 158, 11, 0.3)' 
+      : isFocused 
+        ? 'rgba(245, 158, 11, 0.1)' 
+        : 'rgba(0, 0, 0, 0.7)',
+    color: isSelected ? '#f5d0a9' : '#c9c9c9',
+    '&:hover': {
+      backgroundColor: 'rgba(245, 158, 11, 0.2)'
+    },
+    cursor: 'pointer',
+    fontFamily: 'monospace',
+    padding: '8px 12px'
+  }),
+  multiValue: (styles) => ({
+    ...styles,
+    backgroundColor: 'rgba(245, 158, 11, 0.2)',
+    borderRadius: '3px'
+  }),
+  multiValueLabel: (styles) => ({
+    ...styles,
+    color: '#f5d0a9',
+    fontFamily: 'monospace'
+  }),
+  multiValueRemove: (styles) => ({
+    ...styles,
+    color: '#f5d0a9',
+    '&:hover': {
+      backgroundColor: 'rgba(245, 158, 11, 0.4)',
+      color: '#fff'
+    }
+  }),
+  menu: (styles) => ({
+    ...styles,
+    backgroundColor: 'rgba(0, 0, 0, 0.85)',
+    border: '1px solid rgba(245, 158, 11, 0.2)',
+    boxShadow: '0 4px 12px rgba(0, 0, 0, 0.5)',
+    zIndex: 10
+  }),
+  menuPortal: (styles) => ({
+    ...styles,
+    zIndex: 9999
+  }),
+  input: (styles) => ({
+    ...styles,
+    color: '#c9c9c9',
+    fontFamily: 'monospace'
+  }),
+  placeholder: (styles) => ({
+    ...styles,
+    color: 'rgba(201, 201, 201, 0.5)',
+    fontFamily: 'monospace'
+  }),
+  singleValue: (styles) => ({
+    ...styles,
+    color: '#c9c9c9',
+    fontFamily: 'monospace'
+  }),
+  indicatorSeparator: (styles) => ({
+    ...styles,
+    backgroundColor: 'rgba(245, 158, 11, 0.2)'
+  }),
+  dropdownIndicator: (styles) => ({
+    ...styles,
+    color: 'rgba(245, 158, 11, 0.5)',
+    '&:hover': {
+      color: 'rgba(245, 158, 11, 0.8)'
+    }
+  }),
+  clearIndicator: (styles) => ({
+    ...styles,
+    color: 'rgba(245, 158, 11, 0.5)',
+    '&:hover': {
+      color: 'rgba(245, 158, 11, 0.8)'
+    }
+  }),
+  noOptionsMessage: (styles) => ({
+    ...styles,
+    color: 'rgba(201, 201, 201, 0.7)',
+    fontFamily: 'monospace'
+  }),
+  valueContainer: (styles) => ({
+    ...styles,
+    padding: '2px 8px'
+  })
+};
 
 const getAuthHeader = (): Record<string, string> => {
   const storedCredentials = sessionStorage.getItem('credentials');
@@ -139,9 +249,7 @@ export default function ServerConfiguration() {
   const [availableAssets, setAvailableAssets] = useState<FileEntry[]>([]);
   const [isLoadingPackages, setIsLoadingPackages] = useState(false);
   const [isLoadingAssets, setIsLoadingAssets] = useState(false);
-  const [selectedPackage, setSelectedPackage] = useState<string>('');
-  const [selectedAsset, setSelectedAsset] = useState<string>('');
-
+  
   // Check credentials on component mount
   useEffect(() => {
     // Log credential sources for debugging
@@ -222,90 +330,73 @@ export default function ServerConfiguration() {
     }
   }, [config, loadDirectoryContents]);
 
-  // Handle adding a package to the configuration
-  const handleAddPackage = () => {
-    if (!selectedPackage || !config) return;
-    
-    // Check if package is already in the list
-    if (config.game.packages.includes(selectedPackage)) {
-      toast.error(`Package "${selectedPackage}" is already added`);
-      return;
-    }
-    
-    setConfig(prev => {
-      if (!prev) return prev;
-      return {
-        ...prev,
-        game: {
-          ...prev.game,
-          packages: [...prev.game.packages, selectedPackage]
-        }
-      };
-    });
-    
-    toast.success(`Added package "${selectedPackage}"`);
-    setSelectedPackage('');
-  };
+  // Convert file entries to select options
+  const getPackageOptions = useCallback((): SelectOption[] => {
+    return availablePackages.map(pkg => ({
+      value: pkg.name,
+      label: pkg.name
+    }));
+  }, [availablePackages]);
 
-  // Handle adding an asset to the configuration
-  const handleAddAsset = () => {
-    if (!selectedAsset || !config) return;
-    
-    // Check if asset is already in the list
-    if (config.game.assets.includes(selectedAsset)) {
-      toast.error(`Asset "${selectedAsset}" is already added`);
-      return;
-    }
-    
-    setConfig(prev => {
-      if (!prev) return prev;
-      return {
-        ...prev,
-        game: {
-          ...prev.game,
-          assets: [...prev.game.assets, selectedAsset]
-        }
-      };
-    });
-    
-    toast.success(`Added asset "${selectedAsset}"`);
-    setSelectedAsset('');
-  };
+  const getAssetOptions = useCallback((): SelectOption[] => {
+    return availableAssets.map(asset => ({
+      value: asset.name,
+      label: asset.name
+    }));
+  }, [availableAssets]);
 
-  // Handle removing a package from the configuration
-  const handleRemovePackage = (packageName: string) => {
+  // Get currently selected packages and assets as options
+  const getSelectedPackageOptions = useCallback((): SelectOption[] => {
+    if (!config) return [];
+    return config.game.packages.map(pkg => ({
+      value: pkg,
+      label: pkg
+    }));
+  }, [config]);
+
+  const getSelectedAssetOptions = useCallback((): SelectOption[] => {
+    if (!config) return [];
+    return config.game.assets.map(asset => ({
+      value: asset,
+      label: asset
+    }));
+  }, [config]);
+
+  // Handle select change for packages and assets
+  const handlePackagesChange = (newValue: MultiValue<SelectOption>) => {
     if (!config) return;
     
+    const newPackages = newValue.map(option => option.value);
     setConfig(prev => {
       if (!prev) return prev;
       return {
         ...prev,
         game: {
           ...prev.game,
-          packages: prev.game.packages.filter(p => p !== packageName)
+          packages: newPackages
         }
       };
     });
     
-    toast.success(`Removed package "${packageName}"`);
+    toast.success('Package list updated');
   };
 
-  // Handle removing an asset from the configuration
-  const handleRemoveAsset = (assetName: string) => {
+  const handleAssetsChange = (newValue: MultiValue<SelectOption>) => {
     if (!config) return;
     
+    const newAssets = newValue.map(option => option.value);
     setConfig(prev => {
       if (!prev) return prev;
       return {
         ...prev,
         game: {
           ...prev.game,
-          assets: prev.game.assets.filter(a => a !== assetName)
+          assets: newAssets
         }
       };
     });
     
-    toast.success(`Removed asset "${assetName}"`);
+    toast.success('Asset list updated');
   };
 
   // Load configuration from file
@@ -813,75 +904,66 @@ export default function ServerConfiguration() {
           <label htmlFor="package-select" className="block text-sm font-mono text-gray-300 mb-2">Packages</label>
           
           {/* Package Selection */}
-          <div className="flex mb-2">
-            <div className="relative flex-grow">
-              <select
-                id="package-select"
-                value={selectedPackage}
-                onChange={(e) => setSelectedPackage(e.target.value)}
-                className="w-full bg-black/30 border border-amber-500/20 rounded px-3 py-2 text-gray-300 focus:outline-none focus:border-amber-500/50 appearance-none"
-              >
-                <option value="">Select a package</option>
-                {availablePackages.map((pkg) => (
-                  <option key={pkg.path} value={pkg.name}>{pkg.name}</option>
-                ))}
-              </select>
-              <div className="pointer-events-none absolute inset-y-0 right-0 flex items-center px-2 text-amber-500">
-                <svg className="fill-current h-4 w-4" xmlns="http://www.w3.org/2000/svg" viewBox="0 0 20 20" aria-hidden="true">
-                  <path d="M9.293 12.95l.707.707L15.657 8l-1.414-1.414L10 10.828 5.757 6.586 4.343 8z" />
-                </svg>
+          <div className="flex flex-col space-y-2">
+            <div className="flex items-center">
+              <div className="flex-grow">
+                <Select
+                  inputId="package-select"
+                  value={getSelectedPackageOptions()}
+                  onChange={handlePackagesChange}
+                  options={getPackageOptions()}
+                  isMulti={true}
+                  styles={selectStyles}
+                  placeholder="Select packages..."
+                  noOptionsMessage={({ inputValue }) => 
+                    inputValue 
+                      ? `No packages matching "${inputValue}"` 
+                      : isLoadingPackages 
+                        ? "Loading packages..." 
+                        : "No packages found"
+                  }
+                  className="react-select-container"
+                  classNamePrefix="react-select"
+                  isSearchable={true}
+                  menuPortalTarget={typeof document !== 'undefined' ? document.body : null}
+                  menuPosition="fixed"
+                  isClearable={true}
+                  isLoading={isLoadingPackages}
+                  loadingMessage={() => "Loading packages..."}
+                  filterOption={(option, inputValue) => 
+                    option.label.toLowerCase().includes(inputValue.toLowerCase())
+                  }
+                />
               </div>
+              <button
+                type="button"
+                onClick={() => loadDirectoryContents('packages')}
+                disabled={isLoadingPackages}
+                className="ml-2 px-3 py-2 bg-amber-500/20 text-amber-300 rounded hover:bg-amber-500/30 transition-colors disabled:opacity-50 font-mono text-xs flex items-center"
+                aria-label="Refresh packages list"
+              >
+                {isLoadingPackages ? 
+                  <span className="flex items-center">
+                    <svg className="animate-spin -ml-1 mr-2 h-4 w-4 text-amber-300" xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24" aria-hidden="true">
+                      <circle className="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" strokeWidth="4" />
+                      <path className="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8V0C5.373 0 0 5.373 0 12h4zm2 5.291A7.962 7.962 0 014 12H0c0 3.042 1.135 5.824 3 7.938l3-2.647z" />
+                    </svg>
+                    <span>Loading</span>
+                  </span> : 
+                  <span className="flex items-center">
+                    <svg xmlns="http://www.w3.org/2000/svg" className="h-4 w-4 mr-1" fill="none" viewBox="0 0 24 24" stroke="currentColor" aria-hidden="true">
+                      <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M4 4v5h.582m15.356 2A8.001 8.001 0 004.582 9m0 0H9m11 11v-5h-.581m0 0a8.003 8.003 0 01-15.357-2m15.357 2H15" />
+                    </svg>
+                    <span>Refresh</span>
+                  </span>
+                }
+              </button>
             </div>
-            <button
-              type="button"
-              onClick={handleAddPackage}
-              disabled={!selectedPackage}
-              className="ml-2 px-3 py-2 bg-amber-500/20 text-amber-300 rounded hover:bg-amber-500/30 transition-colors disabled:opacity-50 font-mono text-xs"
-            >
-              Add
-            </button>
-            <button
-              type="button"
-              onClick={() => loadDirectoryContents('packages')}
-              disabled={isLoadingPackages}
-              className="ml-2 px-3 py-2 bg-amber-500/20 text-amber-300 rounded hover:bg-amber-500/30 transition-colors disabled:opacity-50 font-mono text-xs"
-            >
-              {isLoadingPackages ? 
-                <span className="flex items-center">
-                  <svg className="animate-spin -ml-1 mr-2 h-4 w-4 text-amber-300" xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24" aria-hidden="true">
-                    <circle className="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" strokeWidth="4" />
-                    <path className="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8V0C5.373 0 0 5.373 0 12h4zm2 5.291A7.962 7.962 0 014 12H0c0 3.042 1.135 5.824 3 7.938l3-2.647z" />
-                  </svg>
-                  Refresh
-                </span> : 
-                'Refresh'
-              }
-            </button>
-          </div>
-          
-          {/* Current Packages List */}
-          <div className="bg-black/20 border border-amber-500/10 rounded p-3 max-h-40 overflow-y-auto">
-            {config?.game.packages && config.game.packages.length > 0 ? (
-              <ul className="space-y-1">
-                {config.game.packages.map((packageName) => (
-                  <li key={packageName} className="flex justify-between items-center py-1 px-2 hover:bg-amber-500/10 rounded">
-                    <span className="text-sm text-amber-300/90 font-mono">{packageName}</span>
-                    <button
-                      type="button"
-                      onClick={() => handleRemovePackage(packageName)}
-                      className="text-red-400 hover:text-red-300"
-                      aria-label={`Remove ${packageName}`}
-                    >
-                      <svg xmlns="http://www.w3.org/2000/svg" className="h-4 w-4" viewBox="0 0 20 20" fill="currentColor" aria-hidden="true">
-                        <path fillRule="evenodd" d="M4.293 4.293a1 1 0 011.414 0L10 8.586l4.293-4.293a1 1 0 111.414 1.414L11.414 10l4.293 4.293a1 1 0 01-1.414 1.414L10 11.414l-4.293 4.293a1 1 0 01-1.414-1.414L8.586 10 4.293 5.707a1 1 0 010-1.414z" clipRule="evenodd" />
-                      </svg>
-                    </button>
-                  </li>
-                ))}
-              </ul>
-            ) : (
-              <div className="text-amber-400/50 text-sm italic text-center py-2">No packages added</div>
-            )}
+            
+            {/* Help text */}
+            <p className="text-xs text-amber-500/50 italic">
+              Select multiple packages from the dropdown or search by typing
+            </p>
           </div>
         </div>
 
@@ -890,75 +972,66 @@ export default function ServerConfiguration() {
           <label htmlFor="asset-select" className="block text-sm font-mono text-gray-300 mb-2">Assets</label>
           
           {/* Asset Selection */}
-          <div className="flex mb-2">
-            <div className="relative flex-grow">
-              <select
-                id="asset-select"
-                value={selectedAsset}
-                onChange={(e) => setSelectedAsset(e.target.value)}
-                className="w-full bg-black/30 border border-amber-500/20 rounded px-3 py-2 text-gray-300 focus:outline-none focus:border-amber-500/50 appearance-none"
-              >
-                <option value="">Select an asset</option>
-                {availableAssets.map((asset) => (
-                  <option key={asset.path} value={asset.name}>{asset.name}</option>
-                ))}
-              </select>
-              <div className="pointer-events-none absolute inset-y-0 right-0 flex items-center px-2 text-amber-500">
-                <svg className="fill-current h-4 w-4" xmlns="http://www.w3.org/2000/svg" viewBox="0 0 20 20" aria-hidden="true">
-                  <path d="M9.293 12.95l.707.707L15.657 8l-1.414-1.414L10 10.828 5.757 6.586 4.343 8z" />
-                </svg>
+          <div className="flex flex-col space-y-2">
+            <div className="flex items-center">
+              <div className="flex-grow">
+                <Select
+                  inputId="asset-select"
+                  value={getSelectedAssetOptions()}
+                  onChange={handleAssetsChange}
+                  options={getAssetOptions()}
+                  isMulti={true}
+                  styles={selectStyles}
+                  placeholder="Select assets..."
+                  noOptionsMessage={({ inputValue }) => 
+                    inputValue 
+                      ? `No assets matching "${inputValue}"` 
+                      : isLoadingAssets 
+                        ? "Loading assets..." 
+                        : "No assets found"
+                  }
+                  className="react-select-container"
+                  classNamePrefix="react-select"
+                  isSearchable={true}
+                  menuPortalTarget={typeof document !== 'undefined' ? document.body : null}
+                  menuPosition="fixed"
+                  isClearable={true}
+                  isLoading={isLoadingAssets}
+                  loadingMessage={() => "Loading assets..."}
+                  filterOption={(option, inputValue) => 
+                    option.label.toLowerCase().includes(inputValue.toLowerCase())
+                  }
+                />
               </div>
+              <button
+                type="button"
+                onClick={() => loadDirectoryContents('assets')}
+                disabled={isLoadingAssets}
+                className="ml-2 px-3 py-2 bg-amber-500/20 text-amber-300 rounded hover:bg-amber-500/30 transition-colors disabled:opacity-50 font-mono text-xs flex items-center"
+                aria-label="Refresh assets list"
+              >
+                {isLoadingAssets ? 
+                  <span className="flex items-center">
+                    <svg className="animate-spin -ml-1 mr-2 h-4 w-4 text-amber-300" xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24" aria-hidden="true">
+                      <circle className="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" strokeWidth="4" />
+                      <path className="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8V0C5.373 0 0 5.373 0 12h4zm2 5.291A7.962 7.962 0 014 12H0c0 3.042 1.135 5.824 3 7.938l3-2.647z" />
+                    </svg>
+                    <span>Loading</span>
+                  </span> : 
+                  <span className="flex items-center">
+                    <svg xmlns="http://www.w3.org/2000/svg" className="h-4 w-4 mr-1" fill="none" viewBox="0 0 24 24" stroke="currentColor" aria-hidden="true">
+                      <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M4 4v5h.582m15.356 2A8.001 8.001 0 004.582 9m0 0H9m11 11v-5h-.581m0 0a8.003 8.003 0 01-15.357-2m15.357 2H15" />
+                    </svg>
+                    <span>Refresh</span>
+                  </span>
+                }
+              </button>
             </div>
-            <button
-              type="button"
-              onClick={handleAddAsset}
-              disabled={!selectedAsset}
-              className="ml-2 px-3 py-2 bg-amber-500/20 text-amber-300 rounded hover:bg-amber-500/30 transition-colors disabled:opacity-50 font-mono text-xs"
-            >
-              Add
-            </button>
-            <button
-              type="button"
-              onClick={() => loadDirectoryContents('assets')}
-              disabled={isLoadingAssets}
-              className="ml-2 px-3 py-2 bg-amber-500/20 text-amber-300 rounded hover:bg-amber-500/30 transition-colors disabled:opacity-50 font-mono text-xs"
-            >
-              {isLoadingAssets ? 
-                <span className="flex items-center">
-                  <svg className="animate-spin -ml-1 mr-2 h-4 w-4 text-amber-300" xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24" aria-hidden="true">
-                    <circle className="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" strokeWidth="4" />
-                    <path className="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8V0C5.373 0 0 5.373 0 12h4zm2 5.291A7.962 7.962 0 014 12H0c0 3.042 1.135 5.824 3 7.938l3-2.647z" />
-                  </svg>
-                  Refresh
-                </span> : 
-                'Refresh'
-              }
-            </button>
-          </div>
-          
-          {/* Current Assets List */}
-          <div className="bg-black/20 border border-amber-500/10 rounded p-3 max-h-40 overflow-y-auto">
-            {config?.game.assets && config.game.assets.length > 0 ? (
-              <ul className="space-y-1">
-                {config.game.assets.map((assetName) => (
-                  <li key={assetName} className="flex justify-between items-center py-1 px-2 hover:bg-amber-500/10 rounded">
-                    <span className="text-sm text-amber-300/90 font-mono">{assetName}</span>
-                    <button
-                      type="button"
-                      onClick={() => handleRemoveAsset(assetName)}
-                      className="text-red-400 hover:text-red-300"
-                      aria-label={`Remove ${assetName}`}
-                    >
-                      <svg xmlns="http://www.w3.org/2000/svg" className="h-4 w-4" viewBox="0 0 20 20" fill="currentColor" aria-hidden="true">
-                        <path fillRule="evenodd" d="M4.293 4.293a1 1 0 011.414 0L10 8.586l4.293-4.293a1 1 0 111.414 1.414L11.414 10l4.293 4.293a1 1 0 01-1.414 1.414L10 11.414l-4.293 4.293a1 1 0 01-1.414-1.414L8.586 10 4.293 5.707a1 1 0 010-1.414z" clipRule="evenodd" />
-                      </svg>
-                    </button>
-                  </li>
-                ))}
-              </ul>
-            ) : (
-              <div className="text-amber-400/50 text-sm italic text-center py-2">No assets added</div>
-            )}
+            
+            {/* Help text */}
+            <p className="text-xs text-amber-500/50 italic">
+              Select multiple assets from the dropdown or search by typing
+            </p>
           </div>
         </div>
       </section>
