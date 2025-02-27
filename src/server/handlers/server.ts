@@ -28,30 +28,69 @@ const router = Router();
  */
 async function checkServerStatus(): Promise<{running: boolean, pid?: number, uptime?: number}> {
   try {
-    // Use ps command to find the NanosWorldServer process
-    const { stdout } = await execPromise("ps aux | grep NanosWorldServer | grep -v grep");
-    
-    if (stdout.trim()) {
-      // Extract PID from ps output (second column)
-      const pid = Number.parseInt(stdout.trim().split(/\s+/)[1], 10);
-      
-      // Try to get process uptime if we have a valid PID
-      let uptime = undefined;
-      if (pid && !Number.isNaN(pid)) {
-        try {
-          const { stdout: procStats } = await execPromise(`ps -o etimes= -p ${pid}`);
-          uptime = Number.parseInt(procStats.trim(), 10);
-        } catch (e) {
-          console.log('Error getting process uptime:', e);
+    // First check if we have a screen session for the server
+    try {
+      const { stdout: screenList } = await execPromise('screen -ls');
+      if (screenList.includes('nanos-server')) {
+        console.log('Found nanos-server screen session');
+        
+        // Get PID of the screen session
+        const pidMatch = screenList.match(/(\d+)\.nanos-server/);
+        const pid = pidMatch ? Number.parseInt(pidMatch[1], 10) : undefined;
+        
+        // Try to get process uptime if we have a valid PID
+        let uptime = undefined;
+        if (pid && !Number.isNaN(pid)) {
+          try {
+            const { stdout: procStats } = await execPromise(`ps -o etimes= -p ${pid}`);
+            uptime = Number.parseInt(procStats.trim(), 10);
+          } catch (e) {
+            console.log('Error getting process uptime:', e);
+          }
         }
+        
+        // If we have a screen session, consider the server running
+        serverRunning = true;
+        return { running: true, pid, uptime };
       }
-      
-      return { running: true, pid, uptime };
+    } catch (screenError) {
+      console.log('Error checking screen sessions:', screenError);
+      // Continue to try the ps method if screen check fails
     }
     
+    // Fallback: Use ps command to find the NanosWorldServer process
+    try {
+      // Use a more flexible search pattern - look for both NanosWorldServer and the script name
+      const { stdout } = await execPromise("ps aux | grep -E '(NanosWorldServer|nanos-world-server)' | grep -v grep");
+      
+      if (stdout.trim()) {
+        // Extract PID from ps output (second column)
+        const pid = Number.parseInt(stdout.trim().split(/\s+/)[1], 10);
+        
+        // Try to get process uptime if we have a valid PID
+        let uptime = undefined;
+        if (pid && !Number.isNaN(pid)) {
+          try {
+            const { stdout: procStats } = await execPromise(`ps -o etimes= -p ${pid}`);
+            uptime = Number.parseInt(procStats.trim(), 10);
+          } catch (e) {
+            console.log('Error getting process uptime:', e);
+          }
+        }
+        
+        serverRunning = true;
+        return { running: true, pid, uptime };
+      }
+    } catch (psError) {
+      console.log('Error using ps to find server process:', psError);
+    }
+    
+    // If we got here, we couldn't find the server process
+    serverRunning = false;
     return { running: false };
   } catch (error) {
     console.error('Error checking server status:', error);
+    serverRunning = false;
     return { running: false };
   }
 }
@@ -327,30 +366,62 @@ router.get('/logs', async (req: RequestWithUser, res: Response): Promise<void> =
     // Get the query parameters for tail options
     const lines = Number.parseInt(req.query.lines as string || '100', 10);
     
+    // First check if the log file exists
+    let logFileExists = false;
     try {
-      // Use tail command to get the last N lines of the log file
-      const { stdout } = await execPromise(`tail -n ${lines} ${NANOS_LOG_PATH}`);
-      
-      res.json({
-        success: true,
-        logs: stdout.split('\n')
-      });
-    } catch (logError) {
-      // Check if the log file exists
+      await fs.access(NANOS_LOG_PATH);
+      logFileExists = true;
+    } catch {
+      // Log file doesn't exist yet
+      console.log(`Log file not found at ${NANOS_LOG_PATH}`);
+    }
+    
+    // If the server is running in a screen session, try to ensure logging is enabled
+    if (serverRunning) {
       try {
-        await fs.access(NANOS_LOG_PATH);
-      } catch {
-        // Log file doesn't exist yet
+        const { stdout: screenList } = await execPromise('screen -ls');
+        if (screenList.includes('nanos-server')) {
+          // Try to enable logging if it's not already enabled
+          try {
+            await execPromise(`screen -S nanos-server -X logfile ${NANOS_LOG_PATH}`);
+            await execPromise('screen -S nanos-server -X log on');
+            console.log('Enabled screen logging to', NANOS_LOG_PATH);
+          } catch (screenLogError) {
+            console.log('Error enabling screen logging:', screenLogError);
+          }
+        }
+      } catch (screenError) {
+        console.log('Error checking screen sessions for logging:', screenError);
+      }
+    }
+    
+    // If the log file exists, try to read it
+    if (logFileExists) {
+      try {
+        // Use tail command to get the last N lines of the log file
+        const { stdout } = await execPromise(`tail -n ${lines} ${NANOS_LOG_PATH}`);
+        
         res.json({
           success: true,
-          logs: ["Server hasn't been started yet or hasn't produced any logs."]
+          logs: stdout.split('\n')
         });
         return;
+      } catch (logError) {
+        console.error('Error reading log file:', logError);
+        // Continue to fallback messages
       }
-      
-      res.status(500).json({ 
-        success: false, 
-        message: `Failed to read log file: ${(logError as Error).message}` 
+    }
+    
+    // If we reach here, either the log file doesn't exist or we couldn't read it
+    if (serverRunning) {
+      res.json({
+        success: true,
+        logs: ["Server is running, but logs haven't been generated yet or couldn't be accessed."]
+      });
+    } else {
+      res.json({
+        success: true,
+        logs: ["Server hasn't been started yet or hasn't produced any logs."]
       });
     }
   } catch (error) {
