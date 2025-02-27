@@ -1,20 +1,29 @@
 import type { Server, Socket } from 'socket.io';
 import { exec } from 'node:child_process';
-import * as fs from 'node:fs/promises';
-import { createReadStream, watch } from 'node:fs';
+import * as fsPromises from 'node:fs/promises';
+import { createReadStream, watch, type FSWatcher } from 'node:fs';
 import * as path from 'node:path';
 import * as util from 'node:util';
 import * as os from 'node:os';
 import * as osUtils from 'node-os-utils';
 import fetch from 'node-fetch';
+import { readFile, access } from 'node:fs/promises';
 
 // Hardcoded paths as per server.ts
 const NANOS_SERVER_PATH = '/opt/nanos-world-server/NanosWorldServer.sh';
 const NANOS_CONFIG_PATH = '/opt/nanos-world-server/Config.toml';
 const NANOS_LOG_PATH = '/tmp/nanos-server.log';
 
+// Add an interface for the custom watcher object
+interface CustomWatcher {
+  close: () => void;
+}
+
 // Track active log watchers by socket ID
-const logWatchers: Map<string, { watcher: fs.FSWatcher, tail: any }> = new Map();
+const logWatchers: Map<string, { 
+  watcher: FSWatcher | CustomWatcher, 
+  tail: NodeJS.ReadStream | null 
+}> = new Map();
 
 // Function to check server status (simplified version)
 async function checkServerStatus(): Promise<{running: boolean, pid?: number, uptime?: number}> {
@@ -85,17 +94,18 @@ interface ServerResponse {
   logs?: string[];
   message?: string;
   error?: string;
+  configPath?: string;
 }
 
 // Function to ensure the log file exists and is accessible
 async function ensureLogFile(): Promise<boolean> {
   try {
-    await fs.access(NANOS_LOG_PATH);
+    await fsPromises.access(NANOS_LOG_PATH);
     return true;
   } catch {
     try {
       // Create an empty log file if it doesn't exist
-      await fs.writeFile(NANOS_LOG_PATH, '', 'utf-8');
+      await fsPromises.writeFile(NANOS_LOG_PATH, '', 'utf-8');
       return true;
     } catch (error) {
       console.error(`Error creating log file: ${error}`);
@@ -128,7 +138,7 @@ async function getCurrentVersion(): Promise<string> {
   if (currentVersion) return currentVersion;
   
   try {
-    const content = await fs.readFile(LOCAL_UPDATE_FILE, 'utf-8');
+    const content = await fsPromises.readFile(LOCAL_UPDATE_FILE, 'utf-8');
     const localManifest: UpdateManifest = JSON.parse(content);
     currentVersion = localManifest.latest_version;
     return currentVersion;
@@ -338,7 +348,7 @@ export function configureSocketHandlers(io: Server): void {
           throw new Error('Access to this file is restricted');
         }
 
-        const content = await fs.readFile(filePath, 'utf-8');
+        const content = await fsPromises.readFile(filePath, 'utf-8');
         
         callback({
           success: true,
@@ -370,9 +380,9 @@ export function configureSocketHandlers(io: Server): void {
 
         // Ensure directory exists
         const dir = path.dirname(filePath);
-        await fs.mkdir(dir, { recursive: true });
+        await fsPromises.mkdir(dir, { recursive: true });
         
-        await fs.writeFile(filePath, content, 'utf-8');
+        await fsPromises.writeFile(filePath, content, 'utf-8');
         
         callback({
           success: true
@@ -397,12 +407,12 @@ export function configureSocketHandlers(io: Server): void {
           throw new Error('Access to this directory is restricted');
         }
 
-        const files = await fs.readdir(dirPath);
+        const files = await fsPromises.readdir(dirPath);
         
         // Get file stats to distinguish between files and directories
         const fileStats = await Promise.all(files.map(async (file) => {
           const filePath = path.join(dirPath, file);
-          const stats = await fs.stat(filePath);
+          const stats = await fsPromises.stat(filePath);
           return {
             name: file,
             isDirectory: stats.isDirectory(),
@@ -705,7 +715,7 @@ export function configureSocketHandlers(io: Server): void {
           
           // Store interval reference for cleanup
           logWatchers.set(userSocket.id, { 
-            watcher: { close: () => clearInterval(pollInterval) } as any, 
+            watcher: { close: () => clearInterval(pollInterval) } as CustomWatcher, 
             tail: null 
           });
           
