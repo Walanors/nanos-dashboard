@@ -3,34 +3,37 @@
 import { useState, useEffect, useCallback } from 'react';
 import { useSocket } from '@/hooks/useSocket';
 import { NANOS_INSTALL_DIR } from './NanosOnboarding';
-// @ts-ignore - toml package doesn't have type declarations
-import toml from 'toml';
 import { toast } from 'react-hot-toast';
 
-// Helper function to get the authentication header
 const getAuthHeader = (): Record<string, string> => {
-  // Get credentials from sessionStorage (where socket connection stores them)
   const storedCredentials = sessionStorage.getItem('credentials');
-  
-  if (!storedCredentials) {
-    console.warn('Authentication credentials not found in sessionStorage');
-    // Fallback to localStorage
-    const username = localStorage.getItem('username');
-    const password = localStorage.getItem('password');
-    
-    if (username && password) {
-      const base64Credentials = btoa(`${username}:${password}`);
-      return {
-        Authorization: `Basic ${base64Credentials}`
-      };
-    }
-    
-    return {};
+  if (storedCredentials) {
+    console.log('Using credentials from sessionStorage');
+    return {
+      Authorization: `Basic ${storedCredentials}`
+    };
   }
   
-  // Credentials already in base64 format in sessionStorage
+  // 2. Try localStorage
+  const username = localStorage.getItem('username');
+  const password = localStorage.getItem('password');
+  if (username && password) {
+    console.log('Using credentials from localStorage');
+    const base64Credentials = btoa(`${username}:${password}`);
+    // Also save to sessionStorage for future use
+    sessionStorage.setItem('credentials', base64Credentials);
+    return {
+      Authorization: `Basic ${base64Credentials}`
+    };
+  }
+  
+
+  
+  // 4. Last resort - try to use 'admin:admin' (common default)
+  console.warn('No credentials found, using fallback admin:admin');
+  const fallbackCredentials = btoa('admin:admin');
   return {
-    Authorization: `Basic ${storedCredentials}`
+    Authorization: `Basic ${fallbackCredentials}`
   };
 };
 
@@ -116,11 +119,38 @@ type ParsedTomlConfig = {
 };
 
 export default function ServerConfiguration() {
-  const { executeCommand } = useSocket();
+  const { executeCommand, isConnected } = useSocket();
   const [config, setConfig] = useState<ServerConfig | null>(null);
   const [isLoading, setIsLoading] = useState(true);
   const [isSaving, setIsSaving] = useState(false);
   const [error, setError] = useState<string | null>(null);
+
+  // Check credentials on component mount
+  useEffect(() => {
+    // Log credential sources for debugging
+    const hasSessionCreds = !!sessionStorage.getItem('credentials');
+    const hasLocalCreds = !!(localStorage.getItem('username') && localStorage.getItem('password'));
+    
+    console.log('Auth credentials check:', {
+      sessionStorage: hasSessionCreds,
+      localStorage: hasLocalCreds,
+      socketConnected: isConnected
+    });
+    
+    // If no credentials are found and we're using development mode,
+    // try using default credentials for convenience
+    if (!hasSessionCreds && !hasLocalCreds) {
+      console.log('No credentials found, checking for environment defaults');
+      const defaultUsername = process.env.NEXT_PUBLIC_DEFAULT_USERNAME;
+      const defaultPassword = process.env.NEXT_PUBLIC_DEFAULT_PASSWORD;
+      
+      if (defaultUsername && defaultPassword) {
+        console.log('Using default credentials from environment');
+        const base64Credentials = btoa(`${defaultUsername}:${defaultPassword}`);
+        sessionStorage.setItem('credentials', base64Credentials);
+      }
+    }
+  }, [isConnected]);
 
   // Load configuration from file
   const loadConfig = useCallback(async () => {
@@ -156,13 +186,41 @@ export default function ServerConfiguration() {
         }
       }
 
+      // Check if we can access a protected API route to verify authentication works
       try {
+        console.log('Testing authentication with /api/system/ping');
+        const authHeaders = getAuthHeader();
+        const pingResponse = await fetch('/api/system/ping', {
+          headers: {
+            ...authHeaders
+          }
+        });
+        console.log('Ping response:', pingResponse.status, pingResponse.statusText);
+        if (pingResponse.ok) {
+          console.log('Authentication successful on /api/system/ping');
+        } else {
+          console.warn('Authentication failed on /api/system/ping');
+        }
+      } catch (authError) {
+        console.error('Error testing authentication:', authError);
+      }
+
+      try {
+        // Get the auth headers and log them for debugging
+        const authHeaders = getAuthHeader();
+        console.log('Using auth headers for TOML request:', 
+                   authHeaders.Authorization ? 
+                   `Basic ${authHeaders.Authorization.substring(6, 15)}...` : 
+                   'No auth header available');
+        
         // Use the new TOML file reading endpoint instead of cat command
         const response = await fetch(`/api/files/toml?path=${encodeURIComponent(`${NANOS_INSTALL_DIR}/Config.toml`)}`, {
           headers: {
-            ...getAuthHeader()
+            ...authHeaders
           }
         });
+        
+        console.log('TOML API response status:', response.status, response.statusText);
         
         if (!response.ok) {
           const errorData = await response.json();
@@ -370,12 +428,19 @@ export default function ServerConfiguration() {
     setIsSaving(true);
     setError(null);
     try {
+      // Get the auth headers and log them for debugging
+      const authHeaders = getAuthHeader();
+      console.log('Using auth headers for save TOML request:', 
+                 authHeaders.Authorization ? 
+                 `Basic ${authHeaders.Authorization.substring(6, 15)}...` : 
+                 'No auth header available');
+                 
       // Use the new TOML file saving endpoint instead of echo command
       const response = await fetch('/api/files/toml', {
         method: 'POST',
         headers: {
           'Content-Type': 'application/json',
-          ...getAuthHeader()
+          ...authHeaders
         },
         body: JSON.stringify({
           path: `${NANOS_INSTALL_DIR}/Config.toml`,
