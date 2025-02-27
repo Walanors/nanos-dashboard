@@ -4,10 +4,7 @@ import { useState, useEffect, useRef } from 'react';
 import { useSocket } from '@/contexts/SocketContext';
 import { toast } from 'react-hot-toast';
 
-// Define error type to replace 'any'
-interface ErrorWithMessage {
-  message?: string;
-}
+
 
 export default function ServerPage() {
   const { 
