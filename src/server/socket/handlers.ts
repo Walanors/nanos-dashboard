@@ -22,7 +22,7 @@ interface CustomWatcher {
 // Track active log watchers by socket ID
 const logWatchers: Map<string, { 
   watcher: FSWatcher | CustomWatcher, 
-  tail: NodeJS.ReadStream | null,
+  tail: NodeJS.ReadStream | NodeJS.ReadableStream | null,
   lastPosition?: number
 }> = new Map();
 
@@ -651,7 +651,10 @@ export function configureSocketHandlers(io: Server): void {
         if (existingWatcher) {
           existingWatcher.watcher.close();
           if (existingWatcher.tail) {
-            existingWatcher.tail.destroy();
+            // Use type guard to check if destroy method exists
+            if ('destroy' in existingWatcher.tail) {
+              existingWatcher.tail.destroy();
+            }
           }
           logWatchers.delete(userSocket.id);
         }
@@ -700,7 +703,7 @@ export function configureSocketHandlers(io: Server): void {
           try {
             // Get file size to track position
             const stats = await fsPromises.stat(NANOS_LOG_PATH);
-            let lastPosition = stats.size;
+            const lastPosition = stats.size;
             
             // Use tail -f for true streaming
             const tailProcess = exec(`tail -f -n 0 ${NANOS_LOG_PATH}`);
@@ -941,11 +944,14 @@ export function configureSocketHandlers(io: Server): void {
 
     // Unsubscribe from logs
     userSocket.on('unsubscribe_logs', () => {
-      const existingWatcher = logWatchers.get(userSocket.id);
-      if (existingWatcher) {
-        existingWatcher.watcher.close();
-        if (existingWatcher.tail) {
-          existingWatcher.tail.destroy();
+      const watcher = logWatchers.get(userSocket.id);
+      if (watcher) {
+        watcher.watcher.close();
+        if (watcher.tail) {
+          // Use type guard to check if destroy method exists
+          if ('destroy' in watcher.tail) {
+            watcher.tail.destroy();
+          }
         }
         logWatchers.delete(userSocket.id);
         console.log(`Unsubscribed ${userSocket.id} from log updates`);
@@ -954,14 +960,17 @@ export function configureSocketHandlers(io: Server): void {
 
     // Handle disconnection - clean up any log watchers
     userSocket.on('disconnect', () => {
-      console.log(`Socket disconnected: ${userSocket.id}`);
+      console.log(`User disconnected: ${userSocket.data.user.username}`);
       
-      // Clean up log watchers
-      const existingWatcher = logWatchers.get(userSocket.id);
-      if (existingWatcher) {
-        existingWatcher.watcher.close();
-        if (existingWatcher.tail) {
-          existingWatcher.tail.destroy();
+      // Clean up any active log watchers
+      const watcher = logWatchers.get(userSocket.id);
+      if (watcher) {
+        watcher.watcher.close();
+        if (watcher.tail) {
+          // Use type guard to check if destroy method exists
+          if ('destroy' in watcher.tail) {
+            watcher.tail.destroy();
+          }
         }
         logWatchers.delete(userSocket.id);
       }
