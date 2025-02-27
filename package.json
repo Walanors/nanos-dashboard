@@ -10,6 +10,7 @@
     "setup": "bash setup.sh"
   },
   "dependencies": {
+    "@envoy1084/react-terminal": "^0.0.1",
     "@github/stable-socket": "^1.1.1",
     "@iarna/toml": "^2.2.5",
     "@types/better-sqlite3": "^7.6.12",
