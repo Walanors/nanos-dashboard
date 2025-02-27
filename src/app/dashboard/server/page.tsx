@@ -3,6 +3,10 @@
 import { useState, useEffect, useRef } from 'react';
 import { useSocket } from '@/contexts/SocketContext';
 import { toast } from 'react-hot-toast';
+import { Terminal } from 'xterm';
+import { FitAddon } from 'xterm-addon-fit';
+import { WebLinksAddon } from 'xterm-addon-web-links';
+import 'xterm/css/xterm.css';
 
 // Define error type to replace 'any'
 interface ErrorWithMessage {
@@ -30,17 +34,175 @@ export default function ServerPage() {
   const [isStoppingServer, setIsStoppingServer] = useState(false);
   const [isSendingCommand, setIsSendingCommand] = useState(false);
   const terminalRef = useRef<HTMLDivElement>(null);
+  const xtermRef = useRef<Terminal | null>(null);
+  const fitAddonRef = useRef<FitAddon | null>(null);
+  const commandHistoryRef = useRef<string[]>([]);
+  const commandIndexRef = useRef(-1);
+  const [terminalReady, setTerminalReady] = useState(false);
   const logsLengthRef = useRef(logs.length);
 
-  // Auto-scroll to bottom of terminal when new entries are added
+  // Initialize xterm.js terminal
   useEffect(() => {
-    // Only scroll if logs length has increased
-    if (logs.length > logsLengthRef.current && terminalRef.current) {
-      terminalRef.current.scrollIntoView({ behavior: 'smooth' });
+    if (!terminalRef.current || xtermRef.current) return;
+
+    // Create terminal instance
+    const terminal = new Terminal({
+      cursorBlink: true,
+      theme: {
+        background: '#000000',
+        foreground: '#f0c674',
+        cursor: '#f0c674',
+        selectionBackground: '#f0c67444',
+        black: '#1d1f21',
+        red: '#cc6666',
+        green: '#b5bd68',
+        yellow: '#f0c674',
+        blue: '#81a2be',
+        magenta: '#b294bb',
+        cyan: '#8abeb7',
+        white: '#c5c8c6',
+      },
+      fontFamily: 'ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, "Liberation Mono", "Courier New", monospace',
+      fontSize: 14,
+      lineHeight: 1.2,
+      convertEol: true,
+      scrollback: 1000,
+    });
+
+    // Create fit addon to resize terminal to container
+    const fitAddon = new FitAddon();
+    terminal.loadAddon(fitAddon);
+    
+    // Add web links addon to make URLs clickable
+    terminal.loadAddon(new WebLinksAddon());
+
+    // Open terminal in the container
+    terminal.open(terminalRef.current);
+    fitAddon.fit();
+
+    // Store references
+    xtermRef.current = terminal;
+    fitAddonRef.current = fitAddon;
+    
+    // Write welcome message
+    terminal.writeln('\x1b[33m=== Nanos World Server Terminal ===\x1b[0m');
+    terminal.writeln('Type commands and press Enter to send them to the server.');
+    terminal.writeln('');
+    
+    // Set up command input handling
+    let currentCommand = '';
+    
+    terminal.onKey(({ key, domEvent }) => {
+      const printable = !domEvent.altKey && !domEvent.ctrlKey && !domEvent.metaKey;
+      
+      // Handle Enter key
+      if (domEvent.key === 'Enter') {
+        if (currentCommand.trim()) {
+          // Add command to history
+          commandHistoryRef.current.push(currentCommand);
+          commandIndexRef.current = commandHistoryRef.current.length;
+          
+          // Execute command
+          terminal.writeln('');
+          handleTerminalCommand(currentCommand);
+          currentCommand = '';
+        } else {
+          // Just add a new line for empty command
+          terminal.writeln('');
+          terminal.write('\x1b[33m$ \x1b[0m');
+        }
+      }
+      // Handle Backspace
+      else if (domEvent.key === 'Backspace') {
+        if (currentCommand.length > 0) {
+          currentCommand = currentCommand.slice(0, -1);
+          terminal.write('\b \b');
+        }
+      }
+      // Handle arrow up (command history)
+      else if (domEvent.key === 'ArrowUp') {
+        if (commandHistoryRef.current.length > 0 && commandIndexRef.current > 0) {
+          commandIndexRef.current--;
+          // Clear current line
+          terminal.write('\x1b[2K\r\x1b[33m$ \x1b[0m');
+          currentCommand = commandHistoryRef.current[commandIndexRef.current];
+          terminal.write(currentCommand);
+        }
+      }
+      // Handle arrow down (command history)
+      else if (domEvent.key === 'ArrowDown') {
+        if (commandIndexRef.current < commandHistoryRef.current.length - 1) {
+          commandIndexRef.current++;
+          // Clear current line
+          terminal.write('\x1b[2K\r\x1b[33m$ \x1b[0m');
+          currentCommand = commandHistoryRef.current[commandIndexRef.current];
+          terminal.write(currentCommand);
+        } else if (commandIndexRef.current === commandHistoryRef.current.length - 1) {
+          commandIndexRef.current++;
+          // Clear current line
+          terminal.write('\x1b[2K\r\x1b[33m$ \x1b[0m');
+          currentCommand = '';
+        }
+      }
+      // Handle printable characters
+      else if (printable) {
+        currentCommand += key;
+        terminal.write(key);
+      }
+    });
+    
+    // Show initial prompt
+    terminal.write('\x1b[33m$ \x1b[0m');
+    
+    setTerminalReady(true);
+    
+    // Clean up on unmount
+    return () => {
+      terminal.dispose();
+      xtermRef.current = null;
+      fitAddonRef.current = null;
+    };
+  }, []);
+  
+  // Handle window resize
+  useEffect(() => {
+    const handleResize = () => {
+      if (fitAddonRef.current) {
+        fitAddonRef.current.fit();
+      }
+    };
+    
+    window.addEventListener('resize', handleResize);
+    return () => window.removeEventListener('resize', handleResize);
+  }, []);
+  
+  // Handle terminal command execution
+  const handleTerminalCommand = async (cmd: string) => {
+    if (!cmd.trim() || !serverStatus?.running) return;
+    
+    try {
+      if (xtermRef.current) {
+        xtermRef.current.writeln(`\x1b[90mExecuting: ${cmd}\x1b[0m`);
+      }
+      
+      await sendServerCommand(cmd);
+      
+      // Show prompt after command execution
+      if (xtermRef.current) {
+        xtermRef.current.write('\x1b[33m$ \x1b[0m');
+      }
+    } catch (error: unknown) {
+      console.error('Failed to send command:', error);
+      const errorMessage = error instanceof Error ? error.message : 'An unknown error occurred';
+      
+      if (xtermRef.current) {
+        xtermRef.current.writeln(`\x1b[31mError: ${errorMessage}\x1b[0m`);
+        xtermRef.current.write('\x1b[33m$ \x1b[0m');
+      }
+      
+      toast.error(`Failed to send command: ${errorMessage}`);
     }
-    // Update the ref with current logs length
-    logsLengthRef.current = logs.length;
-  }, [logs.length]);
+  };
 
   // Subscribe to logs when component mounts
   useEffect(() => {
@@ -60,6 +222,39 @@ export default function ServerPage() {
       }
     };
   }, [isSubscribedToLogs, subscribeToLogs, unsubscribeFromLogs]);
+
+  // Update terminal with new logs
+  useEffect(() => {
+    if (xtermRef.current && terminalReady && logs.length > 0) {
+      // Get only new logs since last update
+      const lastLogIndex = logsLengthRef.current;
+      const newLogs = logs.slice(lastLogIndex);
+      
+      if (newLogs.length > 0) {
+        // Save current line content
+        const currentLine = xtermRef.current.buffer.active.getLine(xtermRef.current.buffer.active.cursorY)?.translateToString() || '';
+        const cursorX = xtermRef.current.buffer.active.cursorX;
+        
+        // Clear current line
+        xtermRef.current.write('\x1b[2K\r');
+        
+        // Write new logs
+        for (const log of newLogs) {
+          xtermRef.current.writeln(`\x1b[90m${log}\x1b[0m`);
+        }
+        
+        // Restore prompt and current command
+        xtermRef.current.write('\x1b[33m$ \x1b[0m');
+        if (currentLine.length > 2) {
+          const command = currentLine.substring(2);
+          xtermRef.current.write(command);
+        }
+      }
+    }
+    
+    // Update logs length reference
+    logsLengthRef.current = logs.length;
+  }, [logs, terminalReady]);
 
   // Refresh server status periodically
   useEffect(() => {
@@ -85,10 +280,20 @@ export default function ServerPage() {
       await startServer();
       toast.success('Server started successfully');
       await fetchServerStatus();
+      
+      if (xtermRef.current) {
+        xtermRef.current.writeln('\x1b[32mServer started successfully\x1b[0m');
+        xtermRef.current.write('\x1b[33m$ \x1b[0m');
+      }
     } catch (error: unknown) {
       console.error('Failed to start server:', error);
       const errorMessage = error instanceof Error ? error.message : 'An unknown error occurred';
       toast.error(`Failed to start server: ${errorMessage}`);
+      
+      if (xtermRef.current) {
+        xtermRef.current.writeln(`\x1b[31mFailed to start server: ${errorMessage}\x1b[0m`);
+        xtermRef.current.write('\x1b[33m$ \x1b[0m');
+      }
     } finally {
       setIsStartingServer(false);
     }
@@ -100,29 +305,31 @@ export default function ServerPage() {
       await stopServer();
       toast.success('Server stopped successfully');
       await fetchServerStatus();
+      
+      if (xtermRef.current) {
+        xtermRef.current.writeln('\x1b[33mServer stopped successfully\x1b[0m');
+        xtermRef.current.write('\x1b[33m$ \x1b[0m');
+      }
     } catch (error: unknown) {
       console.error('Failed to stop server:', error);
       const errorMessage = error instanceof Error ? error.message : 'An unknown error occurred';
       toast.error(`Failed to stop server: ${errorMessage}`);
+      
+      if (xtermRef.current) {
+        xtermRef.current.writeln(`\x1b[31mFailed to stop server: ${errorMessage}\x1b[0m`);
+        xtermRef.current.write('\x1b[33m$ \x1b[0m');
+      }
     } finally {
       setIsStoppingServer(false);
     }
   };
 
-  const handleSendCommand = async () => {
-    if (!command.trim()) return;
-    
-    setIsSendingCommand(true);
-    try {
-      await sendServerCommand(command);
-      setCommand('');
-    } catch (error: unknown) {
-      console.error('Failed to send command:', error);
-      const errorMessage = error instanceof Error ? error.message : 'An unknown error occurred';
-      toast.error(`Failed to send command: ${errorMessage}`);
-    } finally {
-      setIsSendingCommand(false);
+  const handleClearTerminal = () => {
+    if (xtermRef.current) {
+      xtermRef.current.clear();
+      xtermRef.current.write('\x1b[33m$ \x1b[0m');
     }
+    clearLogs();
   };
 
   const formatUptime = (seconds?: number): string => {
@@ -252,6 +459,11 @@ export default function ServerPage() {
               onClick={() => {
                 unsubscribeFromLogs();
                 subscribeToLogs({ initialLines: 100 });
+                
+                if (xtermRef.current) {
+                  xtermRef.current.writeln('\x1b[33mRefreshing logs...\x1b[0m');
+                  xtermRef.current.write('\x1b[33m$ \x1b[0m');
+                }
               }}
               disabled={isLoadingLogs}
             >
@@ -265,7 +477,7 @@ export default function ServerPage() {
             <button
               type="button"
               className="px-3 py-1 bg-zinc-800/80 text-amber-300 rounded-md hover:bg-zinc-800 transition-colors font-mono text-xs"
-              onClick={clearLogs}
+              onClick={handleClearTerminal}
               disabled={isLoadingLogs}
             >
               Clear
@@ -273,36 +485,21 @@ export default function ServerPage() {
           </div>
         </div>
         
-        {/* Terminal Display */}
-        <div className="mb-4">
-          {isLoadingLogs ? (
-            <div className="flex justify-center items-center h-60">
+        {/* xterm.js Terminal */}
+        <div className="relative">
+          {isLoadingLogs && !terminalReady ? (
+            <div className="flex justify-center items-center h-80">
               <div className="h-8 w-8 animate-spin rounded-full border-4 border-amber-400 border-r-amber-400/30" />
             </div>
           ) : (
-            <div className="relative">
-              <div className="w-full h-60 bg-black/60 border border-amber-500/20 rounded p-3 font-mono text-xs text-amber-300 overflow-auto whitespace-pre">
-                {logs.length === 0 ? (
-                  <div className="text-center py-10 text-amber-400/50">
-                    No logs available
-                  </div>
-                ) : (
-                  <div>
-                    {logs.map((log, index) => (
-                      <div key={`log-${index}-${log.substring(0, 10)}`} className="leading-5">{log}</div>
-                    ))}
-                    <div ref={terminalRef} />
-                  </div>
-                )}
-              </div>
-            </div>
+            <div 
+              ref={terminalRef} 
+              className="w-full h-80 bg-black rounded border border-amber-500/20 overflow-hidden"
+            />
           )}
-        </div>
-        
-        {/* Command Input */}
-        <div className="flex items-center gap-2">
+          
           {!serverStatus?.running && (
-            <div className="absolute -mt-12 ml-3 p-2 bg-red-900/80 border border-red-500/30 rounded text-red-400 text-xs z-10">
+            <div className="absolute top-3 left-3 p-2 bg-red-900/80 border border-red-500/30 rounded text-red-400 text-xs z-10">
               <div className="flex items-start">
                 <svg xmlns="http://www.w3.org/2000/svg" className="h-4 w-4 mr-1" viewBox="0 0 20 20" fill="currentColor" aria-labelledby="alert-icon">
                   <title id="alert-icon">Alert Icon</title>
@@ -312,40 +509,6 @@ export default function ServerPage() {
               </div>
             </div>
           )}
-          
-          <div className="flex-grow flex items-center bg-black/60 border border-amber-500/20 rounded px-2 py-1">
-            <span className="text-amber-500 mr-2 font-mono text-sm">$</span>
-            <input
-              type="text"
-              placeholder="Enter command..."
-              value={command}
-              onChange={(e: React.ChangeEvent<HTMLInputElement>) => setCommand(e.target.value)}
-              onKeyDown={(e: React.KeyboardEvent<HTMLInputElement>) => {
-                if (e.key === 'Enter' && !e.shiftKey) {
-                  e.preventDefault();
-                  handleSendCommand();
-                }
-              }}
-              disabled={isSendingCommand || !(serverStatus?.running ?? false)}
-              className="flex-1 w-full bg-transparent border-none px-1 py-1 text-amber-300 placeholder-amber-400/30 focus:outline-none font-mono text-sm disabled:opacity-50"
-            />
-          </div>
-          
-          <button
-            type="button"
-            onClick={handleSendCommand}
-            disabled={isSendingCommand || !command.trim() || !(serverStatus?.running ?? false)}
-            className="px-4 py-2 bg-amber-500/20 text-amber-300 rounded hover:bg-amber-500/30 transition-colors disabled:opacity-50 disabled:cursor-not-allowed"
-          >
-            {isSendingCommand ? (
-              <div className="h-4 w-4 animate-spin rounded-full border-t-2 border-amber-400 border-r-2 border-amber-400/30" />
-            ) : (
-              <svg xmlns="http://www.w3.org/2000/svg" className="h-4 w-4" viewBox="0 0 20 20" fill="currentColor" aria-labelledby="send-icon">
-                <title id="send-icon">Send Icon</title>
-                <path d="M10.894 2.553a1 1 0 00-1.788 0l-7 14a1 1 0 001.169 1.409l5-1.429A1 1 0 009 15.571V11a1 1 0 112 0v4.571a1 1 0 00.725.962l5 1.428a1 1 0 001.17-1.408l-7-14z" />
-              </svg>
-            )}
-          </button>
         </div>
       </div>
     </div>
