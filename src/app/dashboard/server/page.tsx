@@ -1,16 +1,8 @@
 'use client';
 
-import { useState, useEffect, useRef, useCallback } from 'react';
+import { useState, useEffect, useRef } from 'react';
 import { useSocket } from '@/contexts/SocketContext';
 import { toast } from 'react-hot-toast';
-import {
-  Terminal,
-  TerminalInputBox,
-  TerminalOutput,
-  TerminalTitleBar,
-  TerminalLoader
-} from '@envoy1084/react-terminal';
-import type { ReactNode } from 'react';
 
 // Define error type to replace 'any'
 interface ErrorWithMessage {
@@ -38,16 +30,15 @@ export default function ServerPage() {
   const [isStoppingServer, setIsStoppingServer] = useState(false);
   const [isSendingCommand, setIsSendingCommand] = useState(false);
   const [activeTab, setActiveTab] = useState('overview');
-  const [commandHistory, setCommandHistory] = useState<string[]>([]);
-  const [terminalLogs, setTerminalLogs] = useState<ReactNode[]>([]);
   const terminalRef = useRef<HTMLDivElement>(null);
 
   // Auto-scroll to bottom of terminal when new entries are added
   useEffect(() => {
     if (terminalRef.current && activeTab === 'terminal') {
-      terminalRef.current.scrollTop = terminalRef.current.scrollHeight;
+      terminalRef.current.scrollIntoView({ behavior: 'smooth' });
     }
-  }, [activeTab]); // Only depend on activeTab change
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [activeTab]); // We only need to depend on activeTab, the ref will scroll when logs update
 
   // Subscribe to logs when component mounts or when tab changes to terminal
   useEffect(() => {
@@ -57,9 +48,6 @@ export default function ServerPage() {
           console.error('Failed to subscribe to logs:', error);
           const errorMessage = error instanceof Error ? error.message : 'An unknown error occurred';
           toast.error(`Error subscribing to logs: ${errorMessage}`);
-          
-          // Add error to terminal logs
-          addToTerminalLogs(`Error subscribing to logs: ${errorMessage}`, 'error');
         });
     }
     
@@ -70,17 +58,6 @@ export default function ServerPage() {
       }
     };
   }, [activeTab, isSubscribedToLogs, subscribeToLogs, unsubscribeFromLogs]);
-
-  // Update terminal logs when server logs change
-  useEffect(() => {
-    const newTerminalLogs = logs.map((log) => (
-      <TerminalOutput key={`log-${log.substring(0, 10)}-${Math.random().toString(36).substring(2, 7)}`}>
-        <span className="text-amber-300">{log}</span>
-      </TerminalOutput>
-    ));
-    
-    setTerminalLogs(newTerminalLogs);
-  }, [logs]);
 
   // Refresh server status periodically
   useEffect(() => {
@@ -106,16 +83,10 @@ export default function ServerPage() {
       await startServer();
       toast.success('Server started successfully');
       await fetchServerStatus();
-      
-      // Add to terminal logs
-      addToTerminalLogs('Server started successfully', 'success');
     } catch (error: unknown) {
       console.error('Failed to start server:', error);
       const errorMessage = error instanceof Error ? error.message : 'An unknown error occurred';
       toast.error(`Failed to start server: ${errorMessage}`);
-      
-      // Add to terminal logs
-      addToTerminalLogs(`Failed to start server: ${errorMessage}`, 'error');
     } finally {
       setIsStartingServer(false);
     }
@@ -127,81 +98,29 @@ export default function ServerPage() {
       await stopServer();
       toast.success('Server stopped successfully');
       await fetchServerStatus();
-      
-      // Add to terminal logs
-      addToTerminalLogs('Server stopped successfully', 'success');
     } catch (error: unknown) {
       console.error('Failed to stop server:', error);
       const errorMessage = error instanceof Error ? error.message : 'An unknown error occurred';
       toast.error(`Failed to stop server: ${errorMessage}`);
-      
-      // Add to terminal logs
-      addToTerminalLogs(`Failed to stop server: ${errorMessage}`, 'error');
     } finally {
       setIsStoppingServer(false);
     }
   };
 
-  // Modified to handle form events from the terminal
-  const handleTerminalInput = useCallback((event: React.FormEvent<HTMLDivElement>) => {
-    // Extract the command from the input element
-    const inputElement = event.currentTarget.querySelector('textarea');
-    if (!inputElement) return;
-    
-    const cmd = inputElement.value.trim();
-    if (!cmd) return;
-    
-    // Clear the input
-    inputElement.value = '';
-    
-    // Process the command
-    handleSendCommand(cmd);
-  }, []);
-
-  const handleSendCommand = async (cmd: string) => {
-    if (!cmd.trim()) return;
-    
-    // Add command to history
-    setCommandHistory(prev => [...prev, cmd]);
-    
-    // Add command to terminal logs
-    addToTerminalLogs(`> ${cmd}`, 'command');
+  const handleSendCommand = async () => {
+    if (!command.trim()) return;
     
     setIsSendingCommand(true);
     try {
-      await sendServerCommand(cmd);
+      await sendServerCommand(command);
       setCommand('');
     } catch (error: unknown) {
       console.error('Failed to send command:', error);
       const errorMessage = error instanceof Error ? error.message : 'An unknown error occurred';
       toast.error(`Failed to send command: ${errorMessage}`);
-      
-      // Add error to terminal logs
-      addToTerminalLogs(`Failed to send command: ${errorMessage}`, 'error');
     } finally {
       setIsSendingCommand(false);
     }
-  };
-
-  const addToTerminalLogs = (message: string, type: 'info' | 'error' | 'success' | 'command') => {
-    const timestamp = new Date().toLocaleTimeString();
-    let className = 'text-amber-300'; // default
-    
-    if (type === 'error') className = 'text-red-400';
-    if (type === 'success') className = 'text-green-400';
-    if (type === 'command') className = 'text-amber-500 font-bold';
-    
-    setTerminalLogs(prev => [
-      ...prev,
-      <TerminalOutput key={`terminal-${timestamp}-${Math.random().toString(36).substring(2, 7)}`}>
-        <span className="text-gray-500">[{timestamp}]</span> <span className={className}>{message}</span>
-      </TerminalOutput>
-    ]);
-  };
-
-  const handleClearTerminal = () => {
-    clearLogs();
-    setTerminalLogs([]);
   };
 
   const formatUptime = (seconds?: number): string => {
@@ -355,11 +274,11 @@ export default function ServerPage() {
         </div>
       )}
       
-      {/* Terminal Tab (Combined Console and Logs) */}
+      {/* Terminal Tab (Combined Logs and Console) */}
       {activeTab === 'terminal' && (
         <div className="bg-black/30 border border-amber-500/20 rounded-lg p-6 mb-6">
           <div className="flex items-center justify-between mb-4">
-            <h2 className="text-xl font-semibold text-amber-300 font-mono">Server Terminal</h2>
+            <h2 className="text-xl font-semibold text-amber-300 font-mono">Terminal</h2>
             
             <div className="flex gap-2">
               <button
@@ -368,7 +287,6 @@ export default function ServerPage() {
                 onClick={() => {
                   unsubscribeFromLogs();
                   subscribeToLogs({ initialLines: 100 });
-                  addToTerminalLogs('Refreshed logs', 'info');
                 }}
                 disabled={isLoadingLogs}
               >
@@ -382,7 +300,7 @@ export default function ServerPage() {
               <button
                 type="button"
                 className="px-3 py-1 bg-zinc-800/80 text-amber-300 rounded-md hover:bg-zinc-800 transition-colors font-mono text-xs"
-                onClick={handleClearTerminal}
+                onClick={clearLogs}
                 disabled={isLoadingLogs}
               >
                 Clear
@@ -390,56 +308,80 @@ export default function ServerPage() {
             </div>
           </div>
           
-          {isLoadingLogs && terminalLogs.length === 0 ? (
-            <div className="flex justify-center items-center h-60">
-              <div className="h-8 w-8 animate-spin rounded-full border-4 border-amber-400 border-r-amber-400/30" />
-            </div>
-          ) : (
-            <div className="relative" ref={terminalRef}>
-              <Terminal className="bg-black/60 border border-amber-500/20 rounded p-3 font-mono text-xs text-amber-300 h-[400px] overflow-auto">
-                <TerminalTitleBar>
-                  <TerminalTitleBar.ActionGroup />
-                  <TerminalTitleBar.Title>Nanos Server Terminal</TerminalTitleBar.Title>
-                </TerminalTitleBar>
-                
-                {terminalLogs.length === 0 ? (
-                  <TerminalOutput>
-                    <span className="text-amber-400/50">No logs available</span>
-                  </TerminalOutput>
-                ) : (
-                  terminalLogs
-                )}
-                
-                {isSendingCommand && <TerminalLoader />}
-                
-                {serverStatus?.running ? (
-                  <TerminalInputBox onSubmit={handleTerminalInput}>
-                    <TerminalInputBox.Prompt>server&gt;</TerminalInputBox.Prompt>
-                    <TerminalInputBox.TextArea disabled={!serverStatus?.running} />
-                  </TerminalInputBox>
-                ) : (
-                  <div className="text-red-400 text-xs mt-2 p-2 border border-red-500/20 bg-red-900/10 rounded">
-                    Server is not running. Start the server to send commands.
-                  </div>
-                )}
-              </Terminal>
-            </div>
-          )}
-          
-          {!serverStatus?.running && (
-            <div className="mt-4 p-3 bg-red-900/20 border border-red-500/30 rounded text-red-400 text-sm">
-              <div className="flex items-start">
-                <svg xmlns="http://www.w3.org/2000/svg" className="h-5 w-5 mr-2 mt-0.5" viewBox="0 0 20 20" fill="currentColor" aria-labelledby="alert-icon">
-                  <title id="alert-icon">Alert Icon</title>
-                  <path fillRule="evenodd" d="M18 10a8 8 0 11-16 0 8 8 0 0116 0zm-7 4a1 1 0 11-2 0 1 1 0 012 0zm-1-9a1 1 0 00-1 1v4a1 1 0 102 0V6a1 1 0 00-1-1z" clipRule="evenodd" />
-                </svg>
-                <div>
-                  <div className="font-semibold">Server not running</div>
-                  <p className="text-xs mt-1">Start the server to send commands</p>
+          {/* Terminal Display */}
+          <div className="mb-4">
+            {isLoadingLogs ? (
+              <div className="flex justify-center items-center h-60">
+                <div className="h-8 w-8 animate-spin rounded-full border-4 border-amber-400 border-r-amber-400/30" />
+              </div>
+            ) : (
+              <div className="relative">
+                <div className="w-full h-60 bg-black/60 border border-amber-500/20 rounded p-3 font-mono text-xs text-amber-300 overflow-auto whitespace-pre">
+                  {logs.length === 0 ? (
+                    <div className="text-center py-10 text-amber-400/50">
+                      No logs available
+                    </div>
+                  ) : (
+                    <div>
+                      {logs.map((log, index) => (
+                        <div key={`log-${index}-${log.substring(0, 10)}`} className="leading-5">{log}</div>
+                      ))}
+                      <div ref={terminalRef} />
+                    </div>
+                  )}
                 </div>
               </div>
+            )}
+          </div>
+          
+          {/* Command Input */}
+          <div className="flex items-center gap-2">
+            {!serverStatus?.running && (
+              <div className="absolute -mt-12 ml-3 p-2 bg-red-900/80 border border-red-500/30 rounded text-red-400 text-xs z-10">
+                <div className="flex items-start">
+                  <svg xmlns="http://www.w3.org/2000/svg" className="h-4 w-4 mr-1" viewBox="0 0 20 20" fill="currentColor" aria-labelledby="alert-icon">
+                    <title id="alert-icon">Alert Icon</title>
+                    <path fillRule="evenodd" d="M18 10a8 8 0 11-16 0 8 8 0 0116 0zm-7 4a1 1 0 11-2 0 1 1 0 012 0zm-1-9a1 1 0 00-1 1v4a1 1 0 102 0V6a1 1 0 00-1-1z" clipRule="evenodd" />
+                  </svg>
+                  Server not running
+                </div>
+              </div>
+            )}
+            
+            <div className="flex-grow flex items-center bg-black/60 border border-amber-500/20 rounded px-2 py-1">
+              <span className="text-amber-500 mr-2 font-mono text-sm">$</span>
+              <input
+                type="text"
+                placeholder="Enter command..."
+                value={command}
+                onChange={(e: React.ChangeEvent<HTMLInputElement>) => setCommand(e.target.value)}
+                onKeyDown={(e: React.KeyboardEvent<HTMLInputElement>) => {
+                  if (e.key === 'Enter' && !e.shiftKey) {
+                    e.preventDefault();
+                    handleSendCommand();
+                  }
+                }}
+                disabled={isSendingCommand || !(serverStatus?.running ?? false)}
+                className="flex-1 w-full bg-transparent border-none px-1 py-1 text-amber-300 placeholder-amber-400/30 focus:outline-none font-mono text-sm disabled:opacity-50"
+              />
             </div>
-          )}
+            
+            <button
+              type="button"
+              onClick={handleSendCommand}
+              disabled={isSendingCommand || !command.trim() || !(serverStatus?.running ?? false)}
+              className="px-4 py-2 bg-amber-500/20 text-amber-300 rounded hover:bg-amber-500/30 transition-colors disabled:opacity-50 disabled:cursor-not-allowed"
+            >
+              {isSendingCommand ? (
+                <div className="h-4 w-4 animate-spin rounded-full border-t-2 border-amber-400 border-r-2 border-amber-400/30" />
+              ) : (
+                <svg xmlns="http://www.w3.org/2000/svg" className="h-4 w-4" viewBox="0 0 20 20" fill="currentColor" aria-labelledby="send-icon">
+                  <title id="send-icon">Send Icon</title>
+                  <path d="M10.894 2.553a1 1 0 00-1.788 0l-7 14a1 1 0 001.169 1.409l5-1.429A1 1 0 009 15.571V11a1 1 0 112 0v4.571a1 1 0 00.725.962l5 1.428a1 1 0 001.17-1.408l-7-14z" />
+                </svg>
+              )}
+            </button>
+          </div>
         </div>
       )}
     </div>
