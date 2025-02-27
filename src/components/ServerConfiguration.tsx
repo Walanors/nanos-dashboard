@@ -7,6 +7,24 @@ import { NANOS_INSTALL_DIR } from './NanosOnboarding';
 import toml from 'toml';
 import { toast } from 'react-hot-toast';
 
+// Helper function to get the authentication header
+const getAuthHeader = (): Record<string, string> => {
+  // Get credentials from localStorage or environment
+  const username = localStorage.getItem('username') || process.env.NEXT_PUBLIC_DEFAULT_USERNAME;
+  const password = localStorage.getItem('password') || process.env.NEXT_PUBLIC_DEFAULT_PASSWORD;
+  
+  if (!username || !password) {
+    console.warn('Authentication credentials not found');
+    return {};
+  }
+  
+  // Create base64 encoded credentials
+  const base64Credentials = btoa(`${username}:${password}`);
+  return {
+    Authorization: `Basic ${base64Credentials}`
+  };
+};
+
 // Define the type for the TOML parser output
 interface TomlTable {
   discover?: {
@@ -131,7 +149,11 @@ export default function ServerConfiguration() {
 
       try {
         // Use the new TOML file reading endpoint instead of cat command
-        const response = await fetch(`/api/files/toml?path=${encodeURIComponent(`${NANOS_INSTALL_DIR}/Config.toml`)}`);
+        const response = await fetch(`/api/files/toml?path=${encodeURIComponent(`${NANOS_INSTALL_DIR}/Config.toml`)}`, {
+          headers: {
+            ...getAuthHeader()
+          }
+        });
         
         if (!response.ok) {
           const errorData = await response.json();
@@ -344,6 +366,7 @@ export default function ServerConfiguration() {
         method: 'POST',
         headers: {
           'Content-Type': 'application/json',
+          ...getAuthHeader()
         },
         body: JSON.stringify({
           path: `${NANOS_INSTALL_DIR}/Config.toml`,
