@@ -194,11 +194,9 @@ export default function DashboardLayout({
         <div className="p-4 border-b border-amber-500/20">
           <div className="flex items-center">
             <div className="text-xl font-bold text-amber-400">
-              nanos_
+              nanos_dashboard
             </div>
-            <div className="ml-2 text-xs text-amber-400/50 font-mono self-end">
-              DASHBOARD
-            </div>
+
           </div>
         </div>
 
@@ -207,9 +205,7 @@ export default function DashboardLayout({
           <ul className="space-y-1">
             {[
               { path: '', label: 'Overview', defaultActive: true },
-              { path: 'configuration', label: 'Configuration' },
               { path: 'server', label: 'Server' },
-              { path: 'console', label: 'Console' },
               { path: 'modules', label: 'Modules' },
               { path: 'settings', label: 'Settings' }
             ].map(item => {

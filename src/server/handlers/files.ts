@@ -3,6 +3,10 @@ import type { Request, Response } from 'express';
 import * as fs from 'node:fs/promises';
 import * as path from 'node:path';
 import toml from 'toml';
+import multer from 'multer';
+import * as childProcess from 'node:child_process';
+import { promisify } from 'node:util';
+import { existsSync, mkdirSync } from 'node:fs';
 
 // Define interface for user in request
 interface RequestWithUser extends Request {
@@ -32,7 +36,72 @@ interface ListResult {
   files: FileStats[];
 }
 
-type FileOperationResult = ReadResult | WriteResult | ListResult;
+type FileOperationResult = ReadResult | WriteResult | ListResult | UploadResult | DeleteResult | ExtractResult;
+
+// Extend types for multer
+declare global {
+  namespace Express {
+    interface Request {
+      file?: Multer.File;
+    }
+  }
+}
+
+// Paths for Nanos server packages and assets
+const NANOS_SERVER_PATH = '/opt/nanos-world-server';
+const NANOS_PACKAGES_PATH = path.join(NANOS_SERVER_PATH, 'Packages');
+const NANOS_ASSETS_PATH = path.join(NANOS_SERVER_PATH, 'Assets');
+
+// Create directories if they don't exist
+try {
+  if (!existsSync(NANOS_PACKAGES_PATH)) {
+    mkdirSync(NANOS_PACKAGES_PATH, { recursive: true });
+  }
+  if (!existsSync(NANOS_ASSETS_PATH)) {
+    mkdirSync(NANOS_ASSETS_PATH, { recursive: true });
+  }
+} catch (error) {
+  console.error('Failed to create directories:', error);
+}
+
+// Upload storage configuration
+const storage = multer.diskStorage({
+  destination: (req: Request, file: Express.Multer.File, cb: (error: Error | null, destination: string) => void) => {
+    const type = (req.query.type || 'packages') as string;
+    const uploadPath = type.toLowerCase() === 'assets' ? NANOS_ASSETS_PATH : NANOS_PACKAGES_PATH;
+    cb(null, uploadPath);
+  },
+  filename: (req: Request, file: Express.Multer.File, cb: (error: Error | null, filename: string) => void) => {
+    cb(null, file.originalname);
+  }
+});
+
+const upload = multer({
+  storage,
+  limits: {
+    fileSize: 1024 * 1024 * 500 // 500MB limit
+  }
+});
+
+// Promisify exec
+const execPromise = promisify(childProcess.exec);
+
+// Define new result interfaces
+interface UploadResult {
+  success: boolean;
+  filePath?: string;
+  fileName?: string;
+}
+
+interface DeleteResult {
+  success: boolean;
+  path?: string;
+}
+
+interface ExtractResult {
+  success: boolean;
+  extractedTo?: string;
+}
 
 const router = Router();
 
@@ -301,6 +370,119 @@ router.post('/toml', async (req: RequestWithUser, res: Response): Promise<void> 
   } catch (error) {
     console.error(`Error handling TOML save request: ${(error as Error).message}`);
     res.status(500).json({ error: 'Internal server error' });
+  }
+});
+
+// Route to upload a file to Packages or Assets directory
+router.post('/upload', upload.single('file'), async (req: RequestWithUser & { file?: Express.Multer.File }, res: Response): Promise<void> => {
+  try {
+    if (!req.file) {
+      res.status(400).json({ success: false, error: 'No file uploaded' });
+      return;
+    }
+
+    console.log(`File uploaded by ${req.user?.username || 'unknown user'}: ${req.file.originalname}`);
+    
+    res.json({
+      success: true,
+      filePath: req.file.path,
+      fileName: req.file.originalname
+    });
+  } catch (error) {
+    console.error('Error uploading file:', (error as Error).message);
+    res.status(500).json({
+      success: false,
+      error: (error as Error).message
+    });
+  }
+});
+
+// Route to delete a file or directory
+router.delete('/delete', async (req: RequestWithUser, res: Response): Promise<void> => {
+  try {
+    const { path: filePath } = req.query;
+    
+    if (!filePath || typeof filePath !== 'string') {
+      res.status(400).json({ success: false, error: 'File path is required' });
+      return;
+    }
+
+    // Security check to ensure we're only operating within allowed directories
+    if (!filePath.startsWith(NANOS_PACKAGES_PATH) && !filePath.startsWith(NANOS_ASSETS_PATH)) {
+      res.status(403).json({ success: false, error: 'Operation not allowed on this path' });
+      return;
+    }
+
+    const stats = await fs.stat(filePath);
+    
+    if (stats.isDirectory()) {
+      await fs.rm(filePath, { recursive: true, force: true });
+    } else {
+      await fs.unlink(filePath);
+    }
+    
+    console.log(`File/directory deleted by ${req.user?.username || 'unknown user'}: ${filePath}`);
+    
+    res.json({
+      success: true,
+      path: filePath
+    });
+  } catch (error) {
+    console.error('Error deleting file:', (error as Error).message);
+    res.status(500).json({
+      success: false,
+      error: (error as Error).message
+    });
+  }
+});
+
+// Route to extract zip/tar files
+router.post('/extract', async (req: RequestWithUser, res: Response): Promise<void> => {
+  try {
+    const { path: filePath } = req.body;
+    
+    if (!filePath || typeof filePath !== 'string') {
+      res.status(400).json({ success: false, error: 'File path is required' });
+      return;
+    }
+
+    // Security check to ensure we're only operating within allowed directories
+    if (!filePath.startsWith(NANOS_PACKAGES_PATH) && !filePath.startsWith(NANOS_ASSETS_PATH)) {
+      res.status(403).json({ success: false, error: 'Operation not allowed on this path' });
+      return;
+    }
+
+    // Get the directory where the file is located
+    const targetDir = path.dirname(filePath);
+    let extractCommand = '';
+
+    // Determine the appropriate extraction command based on file extension
+    if (filePath.endsWith('.zip')) {
+      extractCommand = `unzip -o "${filePath}" -d "${targetDir}"`;
+    } else if (filePath.endsWith('.tar')) {
+      extractCommand = `tar -xf "${filePath}" -C "${targetDir}"`;
+    } else if (filePath.endsWith('.tar.gz') || filePath.endsWith('.tgz')) {
+      extractCommand = `tar -xzf "${filePath}" -C "${targetDir}"`;
+    } else {
+      res.status(400).json({ success: false, error: 'Unsupported archive format' });
+      return;
+    }
+
+    // Execute the extraction command
+    await execPromise(extractCommand);
+    
+    console.log(`File extracted by ${req.user?.username || 'unknown user'}: ${filePath}`);
+    
+    res.json({
+      success: true,
+      extractedTo: targetDir
+    });
+  } catch (error) {
+    console.error('Error extracting file:', (error as Error).message);
+    res.status(500).json({
+      success: false,
+      error: (error as Error).message
+    });
   }
 });
 
