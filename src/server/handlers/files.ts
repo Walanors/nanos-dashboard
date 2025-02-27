@@ -7,7 +7,6 @@ import multer from 'multer';
 import * as childProcess from 'node:child_process';
 import { promisify } from 'node:util';
 import { existsSync, mkdirSync } from 'node:fs';
-import { PassThrough } from 'node:stream';
 
 // Define interface for user in request
 interface RequestWithUser extends Request {
@@ -86,32 +85,6 @@ const upload = multer({
 
 // Promisify exec
 const execPromise = promisify(childProcess.exec);
-
-// Helper function to spawn a process with stream handling
-const spawnProcessPromise = (command: string, args: string[], options: childProcess.SpawnOptions = {}): Promise<{exitCode: number; error?: string}> => {
-  return new Promise((resolve, reject) => {
-    const process = childProcess.spawn(command, args, options);
-    let errorOutput = '';
-
-    if (process.stderr) {
-      process.stderr.on('data', (data) => {
-        errorOutput += data.toString();
-      });
-    }
-
-    process.on('error', (error) => {
-      reject(new Error(`Process error: ${error.message}`));
-    });
-
-    process.on('close', (code) => {
-      if (code !== 0) {
-        resolve({ exitCode: code || 1, error: errorOutput || `Process exited with code ${code}` });
-      } else {
-        resolve({ exitCode: 0 });
-      }
-    });
-  });
-};
 
 // Define new result interfaces
 interface UploadResult {
@@ -481,36 +454,22 @@ router.post('/extract', async (req: RequestWithUser, res: Response): Promise<voi
 
     // Get the directory where the file is located
     const targetDir = path.dirname(filePath);
-    
-    // Use spawn instead of exec to handle large outputs
-    let result: {exitCode: number; error?: string};
+    let extractCommand = '';
+
+    // Determine the appropriate extraction command based on file extension
     if (filePath.endsWith('.zip')) {
-      // For zip files
-      result = await spawnProcessPromise('unzip', ['-o', filePath, '-d', targetDir], {
-        cwd: process.cwd(),
-        shell: false
-      });
+      extractCommand = `unzip -o "${filePath}" -d "${targetDir}"`;
     } else if (filePath.endsWith('.tar')) {
-      // For tar files
-      result = await spawnProcessPromise('tar', ['-xf', filePath, '-C', targetDir], {
-        cwd: process.cwd(),
-        shell: false
-      });
+      extractCommand = `tar -xf "${filePath}" -C "${targetDir}"`;
     } else if (filePath.endsWith('.tar.gz') || filePath.endsWith('.tgz')) {
-      // For tar.gz files
-      result = await spawnProcessPromise('tar', ['-xzf', filePath, '-C', targetDir], {
-        cwd: process.cwd(),
-        shell: false
-      });
+      extractCommand = `tar -xzf "${filePath}" -C "${targetDir}"`;
     } else {
       res.status(400).json({ success: false, error: 'Unsupported archive format' });
       return;
     }
 
-    // Check for errors
-    if (result.exitCode !== 0) {
-      throw new Error(result.error || `Extraction failed with exit code ${result.exitCode}`);
-    }
+    // Execute the extraction command
+    await execPromise(extractCommand);
     
     console.log(`File extracted by ${req.user?.username || 'unknown user'}: ${filePath}`);
     
