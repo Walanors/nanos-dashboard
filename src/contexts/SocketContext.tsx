@@ -824,11 +824,18 @@ export function SocketProvider({ children }: { children: ReactNode }) {
         return trimmedLog;
       });
     
+    // Only update if we have logs to add
+    if (processedLogs.length === 0) return;
+    
     setLogs(prevLogs => {
       if (data.type === 'initial') {
         // Replace logs with initial data
+        console.log(`Replacing logs with ${processedLogs.length} initial entries`);
         return processedLogs;
       }
+      
+      // For incremental updates, only add new logs
+      console.log(`Adding ${processedLogs.length} new log entries`);
       
       // Add new logs while respecting the max limit
       const newLogs = [...prevLogs, ...processedLogs];
