@@ -57,23 +57,23 @@ export default function ModulesPage() {
 
   // Show the modules manager
   return (
-    <div className="min-h-screen bg-black/95">
-      <div className="container mx-auto px-4 py-8">
-        {/* Connection status indicator */}
-        <div className="mb-6">
-          {socketError && !isConnected && (
-            <div className="bg-red-900/20 border border-red-500/30 p-3 rounded">
-              <p className="text-red-400 text-sm">
-                Connection warning: {socketError}
-              </p>
-            </div>
-          )}
+    <div className="container-fluid p-4 w-full max-w-none">
+      <div className="flex items-center justify-between mb-6">
+        <h1 className="text-2xl font-bold text-amber-300 font-mono">Modules Manager</h1>
+      </div>
+      
+      {/* Connection status indicator */}
+      {socketError && !isConnected && (
+        <div className="mb-6 bg-red-900/20 border border-red-500/30 p-3 rounded">
+          <p className="text-red-400 text-sm">
+            Connection warning: {socketError}
+          </p>
         </div>
-        
-        {/* Main Content */}
-        <div className="bg-black/30 border border-amber-500/20 rounded-lg shadow">
-          <ModulesManager />
-        </div>
+      )}
+      
+      {/* Main Content */}
+      <div className="bg-black/30 border border-amber-500/20 rounded-lg shadow">
+        <ModulesManager />
       </div>
     </div>
   );

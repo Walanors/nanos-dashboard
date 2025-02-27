@@ -328,8 +328,6 @@ export default function ModulesManager() {
   
   return (
     <div className="p-6 space-y-6">
-      <h2 className="text-2xl font-mono text-amber-400 mb-4">Modules Manager</h2>
-      
       {/* Search and filters */}
       <div className="flex flex-col md:flex-row gap-4">
         <div className="flex-grow">
