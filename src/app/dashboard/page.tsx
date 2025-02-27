@@ -3,19 +3,13 @@
 import { useEffect, useState } from 'react';
 import { useRouter } from 'next/navigation';
 import { useSocket } from '@/hooks/useSocket';
-import { useUser } from '@/hooks/useUser';
-import ServerConfiguration from '@/components/ServerConfiguration';
 
 export default function DashboardPage() {
   const router = useRouter();
   const [isLoading, setIsLoading] = useState(true);
-  const [activeTab, setActiveTab] = useState('configuration');
   
   // Get socket connection with metrics
   const { isConnected, connectionError: socketError, metrics } = useSocket();
-  
-  // Get user data including onboarding status
-  const { userData, loading: userLoading } = useUser();
   
   useEffect(() => {
     // Check if user is authenticated
@@ -28,18 +22,8 @@ export default function DashboardPage() {
       setIsLoading(false);
     }
   }, [router]);
-  
-  const renderContent = () => {
-    switch (activeTab) {
-      case 'configuration':
-        return <ServerConfiguration />;
-      // Add other tabs here
-      default:
-        return null;
-    }
-  };
 
-  if (isLoading || userLoading) {
+  if (isLoading) {
     return (
       <div className="flex justify-center items-center h-screen">
         <div className="animate-pulse text-amber-400 text-lg font-mono">
@@ -67,42 +51,109 @@ export default function DashboardPage() {
   }
 
   return (
-    <div className="min-h-screen bg-black/95">
-      <div className="container mx-auto px-4 py-8">
-        <h1 className="text-2xl font-bold text-amber-300 mb-8 font-mono">Server Dashboard</h1>
+    <div className="min-h-screen bg-black/95 p-8">
+      <h1 className="text-2xl font-bold text-amber-300 mb-6 font-mono">Dashboard Overview</h1>
+      
+      {/* System Stats Summary */}
+      <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-4 gap-6 mb-8">
+        <div className="bg-black/40 border border-amber-500/20 rounded-lg p-4">
+          <h3 className="text-amber-400/80 text-sm font-mono mb-2">System Uptime</h3>
+          <div className="text-amber-300 text-xl font-mono">
+            {metrics ? formatTime(metrics.uptime) : 'N/A'}
+          </div>
+        </div>
         
-        {/* Connection status indicator */}
-        <div className="mb-6">
-          {socketError && !isConnected && (
-            <div className="bg-red-900/20 border border-red-500/30 p-3 rounded">
-              <p className="text-red-400 text-sm">
-                Connection warning: {socketError}
-              </p>
+        <div className="bg-black/40 border border-amber-500/20 rounded-lg p-4">
+          <h3 className="text-amber-400/80 text-sm font-mono mb-2">Memory Usage</h3>
+          <div className="text-amber-300 text-xl font-mono">
+            {metrics ? `${Math.round(metrics.memory.usedPercent)}%` : 'N/A'}
+          </div>
+        </div>
+        
+        <div className="bg-black/40 border border-amber-500/20 rounded-lg p-4">
+          <h3 className="text-amber-400/80 text-sm font-mono mb-2">CPU Load</h3>
+          <div className="text-amber-300 text-xl font-mono">
+            {metrics ? `${Math.round(metrics.cpu.usage)}%` : 'N/A'}
+          </div>
+        </div>
+        
+        <div className="bg-black/40 border border-amber-500/20 rounded-lg p-4">
+          <h3 className="text-amber-400/80 text-sm font-mono mb-2">Version</h3>
+          <div className="text-amber-300 text-xl font-mono">
+            {metrics ? metrics.version.current : 'N/A'}
+          </div>
+        </div>
+      </div>
+      
+      {/* Quick Actions */}
+      <h2 className="text-xl font-mono text-amber-400 mb-4">Quick Actions</h2>
+      <div className="grid grid-cols-1 md:grid-cols-3 gap-4 mb-8">
+        <button
+          type="button"
+          onClick={() => router.push('/dashboard/configuration')}
+          className="bg-black/40 border border-amber-500/20 rounded-lg p-6 text-left hover:bg-black/60 transition-colors"
+        >
+          <h3 className="text-amber-300 font-mono mb-2">Edit Configuration</h3>
+          <p className="text-amber-400/60 text-sm">
+            Modify server settings and game options
+          </p>
+        </button>
+        
+        <button
+          type="button" 
+          onClick={() => router.push('/dashboard/console')}
+          className="bg-black/40 border border-amber-500/20 rounded-lg p-6 text-left hover:bg-black/60 transition-colors"
+        >
+          <h3 className="text-amber-300 font-mono mb-2">Server Console</h3>
+          <p className="text-amber-400/60 text-sm">
+            View logs and run server commands
+          </p>
+        </button>
+        
+        <button
+          type="button"
+          onClick={() => router.push('/dashboard/modules')}
+          className="bg-black/40 border border-amber-500/20 rounded-lg p-6 text-left hover:bg-black/60 transition-colors"
+        >
+          <h3 className="text-amber-300 font-mono mb-2">Manage Modules</h3>
+          <p className="text-amber-400/60 text-sm">
+            Install, update, and configure modules
+          </p>
+        </button>
+      </div>
+      
+      {/* Version Info */}
+      {metrics?.version.updateAvailable && (
+        <div className="bg-amber-500/10 border border-amber-500/30 rounded-lg p-4 mb-8">
+          <h3 className="text-amber-300 font-mono mb-2">Update Available</h3>
+          <p className="text-amber-400/80 mb-4">
+            A new version ({metrics.version.latest}) is available. You are currently running version {metrics.version.current}.
+          </p>
+          {metrics.version.updateInfo?.changelog && (
+            <div className="bg-black/40 p-3 rounded mb-4">
+              <h4 className="text-amber-300/80 font-mono text-sm mb-2">Changelog:</h4>
+              <p className="text-amber-400/70 text-sm whitespace-pre-line">{metrics.version.updateInfo.changelog}</p>
             </div>
           )}
         </div>
-        
-        {/* Navigation Tabs */}
-        <div className="flex space-x-4 mb-6 border-b border-amber-500/20">
-          <button
-            type="button"
-            onClick={() => setActiveTab('configuration')}
-            className={`px-4 py-2 font-mono text-sm transition-colors ${
-              activeTab === 'configuration'
-                ? 'text-amber-300 border-b-2 border-amber-500'
-                : 'text-gray-400 hover:text-amber-300'
-            }`}
-          >
-            Configuration
-          </button>
-          {/* Add other tabs here */}
-        </div>
-
-        {/* Content Area */}
-        <div className="bg-black/40 rounded-lg border border-amber-500/20">
-          {renderContent()}
-        </div>
-      </div>
+      )}
     </div>
   );
+}
+
+// Helper function to format time
+function formatTime(seconds: number): string {
+  const days = Math.floor(seconds / 86400);
+  const hours = Math.floor((seconds % 86400) / 3600);
+  const minutes = Math.floor((seconds % 3600) / 60);
+  
+  if (days > 0) {
+    return `${days}d ${hours}h ${minutes}m`;
+  }
+  
+  if (hours > 0) {
+    return `${hours}h ${minutes}m`;
+  }
+  
+  return `${minutes}m`;
 } 
