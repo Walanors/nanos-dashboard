@@ -4,6 +4,9 @@ import { useState, useEffect, useCallback } from 'react';
 import { useSocket } from '@/hooks/useSocket';
 import { NANOS_INSTALL_DIR } from './NanosOnboarding';
 import { toast } from 'react-hot-toast';
+import { FiDownload, FiTrash2, FiRefreshCw, FiInfo } from 'react-icons/fi';
+import Select from 'react-select';
+import type { SingleValue } from 'react-select';
 
 // Define module type
 interface Module {
@@ -304,6 +307,22 @@ export default function ModulesManager() {
   // Get all unique tags from the modules
   const allTags = Array.from(new Set(availableModules.flatMap(module => module.tags))).sort();
   
+  // Format tags for react-select
+  const tagOptions = [
+    { value: '', label: 'All Tags' },
+    ...allTags.map(tag => ({ value: tag, label: tag }))
+  ];
+
+  // Get current tag option
+  const getCurrentTagOption = () => {
+    return tagOptions.find(option => option.value === (selectedTag || '')) || tagOptions[0];
+  };
+
+  // Handle tag change
+  const handleTagChange = (newValue: SingleValue<{ value: string; label: string }>) => {
+    setSelectedTag(newValue?.value || null);
+  };
+  
   // Check if a module is installed
   const isModuleInstalled = (moduleId: string) => {
     return installedModules.some(m => m.id === moduleId);
@@ -353,16 +372,20 @@ export default function ModulesManager() {
             <option value="not-installed">Not Installed</option>
           </select>
           
-          <select
-            value={selectedTag || ''}
-            onChange={(e) => setSelectedTag(e.target.value || null)}
-            className="px-3 py-2 bg-gray-800/50 border border-amber-500/20 rounded text-gray-300 focus:border-amber-500/50 focus:outline-none"
-          >
-            <option value="">All Tags</option>
-            {allTags.map(tag => (
-              <option key={tag} value={tag}>{tag}</option>
-            ))}
-          </select>
+          <div className="w-48">
+            <Select
+              value={getCurrentTagOption()}
+              onChange={handleTagChange}
+              options={tagOptions}
+              isMulti={false}
+              placeholder="Filter by tag..."
+              className="react-select-container"
+              classNamePrefix="react-select"
+              isSearchable={true}
+              isClearable={false}
+              aria-label="Filter by tag"
+            />
+          </div>
         </div>
       </div>
       
@@ -457,14 +480,42 @@ export default function ModulesManager() {
                 <div className="flex flex-wrap gap-1 mb-4">
                   {module.tags.map(tag => (
                     <button 
-                      key={tag} 
-                      type="button"
-                      className="text-xs bg-amber-800/30 text-amber-300 px-2 py-0.5 rounded-full cursor-pointer hover:bg-amber-800/50"
+                      key={tag}
+                      className="react-select__multi-value"
+                      style={{ cursor: 'pointer', border: 'none', padding: 0, background: 'transparent', display: 'flex' }}
                       onClick={() => setSelectedTag(tag === selectedTag ? null : tag)}
-                      onKeyUp={() => setSelectedTag(tag === selectedTag ? null : tag)}
+                      onKeyDown={(e) => {
+                        if (e.key === 'Enter' || e.key === ' ') {
+                          e.preventDefault();
+                          setSelectedTag(tag === selectedTag ? null : tag);
+                        }
+                      }}
                       aria-label={`Filter by tag: ${tag}`}
+                      aria-pressed={selectedTag === tag}
+                      type="button"
                     >
-                      {tag}
+                      <div className="react-select__multi-value__label">{tag}</div>
+                      {selectedTag === tag && (
+                        <button 
+                          className="react-select__multi-value__remove"
+                          onClick={(e) => {
+                            e.stopPropagation();
+                            setSelectedTag(null);
+                          }}
+                          onKeyDown={(e) => {
+                            if (e.key === 'Enter' || e.key === ' ') {
+                              e.preventDefault();
+                              e.stopPropagation();
+                              setSelectedTag(null);
+                            }
+                          }}
+                          aria-label="Clear tag filter"
+                          type="button"
+                          style={{ border: 'none', padding: 0, background: 'transparent' }}
+                        >
+                          ×
+                        </button>
+                      )}
                     </button>
                   ))}
                 </div>
