@@ -9,19 +9,28 @@ import { toast } from 'react-hot-toast';
 
 // Helper function to get the authentication header
 const getAuthHeader = (): Record<string, string> => {
-  // Get credentials from localStorage or environment
-  const username = localStorage.getItem('username') || process.env.NEXT_PUBLIC_DEFAULT_USERNAME;
-  const password = localStorage.getItem('password') || process.env.NEXT_PUBLIC_DEFAULT_PASSWORD;
+  // Get credentials from sessionStorage (where socket connection stores them)
+  const storedCredentials = sessionStorage.getItem('credentials');
   
-  if (!username || !password) {
-    console.warn('Authentication credentials not found');
+  if (!storedCredentials) {
+    console.warn('Authentication credentials not found in sessionStorage');
+    // Fallback to localStorage
+    const username = localStorage.getItem('username');
+    const password = localStorage.getItem('password');
+    
+    if (username && password) {
+      const base64Credentials = btoa(`${username}:${password}`);
+      return {
+        Authorization: `Basic ${base64Credentials}`
+      };
+    }
+    
     return {};
   }
   
-  // Create base64 encoded credentials
-  const base64Credentials = btoa(`${username}:${password}`);
+  // Credentials already in base64 format in sessionStorage
   return {
-    Authorization: `Basic ${base64Credentials}`
+    Authorization: `Basic ${storedCredentials}`
   };
 };
 
