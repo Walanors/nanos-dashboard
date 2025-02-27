@@ -19,10 +19,28 @@ export default function DashboardLayout({
   const router = useRouter();
   const pathname = usePathname();
   const socketContext = useSocket();
-  const { metrics, isConnected, connectionError, reconnect, executeCommand } = socketContext;
+  const { metrics, isConnected, isConnecting, connectionError, reconnect, executeCommand, connectionState } = socketContext;
   const [activeMenu, setActiveMenu] = useState<string>('');
   const { userData, loading: userLoading } = useUser();
   const [isUpdating, setIsUpdating] = useState(false);
+  const [connectionAttempts, setConnectionAttempts] = useState(0);
+  const [showRetryButton, setShowRetryButton] = useState(false);
+
+  // Set up a timer to show retry button after multiple connection attempts
+  useEffect(() => {
+    if (isConnecting && !isConnected) {
+      setConnectionAttempts(prev => prev + 1);
+      
+      // After 3 attempts, show the retry button
+      if (connectionAttempts >= 3) {
+        setShowRetryButton(true);
+      }
+    } else if (isConnected) {
+      // Reset when connected
+      setConnectionAttempts(0);
+      setShowRetryButton(false);
+    }
+  }, [isConnecting, isConnected, connectionAttempts]);
 
   // Format bytes to human-readable size
   const formatBytes = (bytes: number): string => {
@@ -91,14 +109,69 @@ export default function DashboardLayout({
     }
   };
 
-  // Show loading state
-  if (userLoading) {
+  // Show loading state for either user loading or waiting for socket connection
+  if (userLoading || (!isConnected && (isConnecting || connectionAttempts < 3))) {
     return (
-      <div className="flex min-h-screen items-center justify-center bg-gradient-to-br from-black to-zinc-900">
-        <div className="animate-pulse text-amber-400 text-lg font-mono">
+      <div className="flex flex-col min-h-screen items-center justify-center bg-gradient-to-br from-black to-zinc-900">
+        <div className="animate-pulse text-amber-400 text-lg font-mono mb-4">
           <span className="mr-2">$</span>
-          Loading...
+          {userLoading ? 'Loading user data...' : 'Establishing server connection...'}
         </div>
+        {!userLoading && isConnecting && (
+          <div className="text-xs text-amber-400/70 font-mono mt-2">
+            Attempt {connectionState.reconnectCount || connectionAttempts + 1} of 10
+          </div>
+        )}
+        {!userLoading && connectionError && (
+          <div className="text-xs text-red-400 font-mono mt-2 max-w-md text-center">
+            {connectionError}
+          </div>
+        )}
+        {showRetryButton && (
+          <button
+            type="button"
+            onClick={() => {
+              reconnect();
+              setConnectionAttempts(0);
+            }}
+            className="mt-6 px-4 py-2 bg-amber-500/20 text-amber-300 rounded-md hover:bg-amber-500/30 transition-colors font-mono text-sm"
+          >
+            Retry Connection
+          </button>
+        )}
+      </div>
+    );
+  }
+
+  // Show connection error state if we've tried multiple times and still failed
+  if (!isConnected && connectionAttempts >= 3) {
+    return (
+      <div className="flex flex-col min-h-screen items-center justify-center bg-gradient-to-br from-black to-zinc-900">
+        <div className="text-red-400 text-lg font-mono mb-4">
+          <span className="mr-2">!</span>
+          Unable to establish server connection
+        </div>
+        <div className="text-xs text-amber-400/70 font-mono mt-2 mb-6 max-w-md text-center">
+          {connectionError || "The dashboard couldn't connect to the server after multiple attempts."}
+        </div>
+        <button
+          type="button"
+          onClick={() => {
+            reconnect();
+            setConnectionAttempts(0);
+            setShowRetryButton(false);
+          }}
+          className="px-4 py-2 bg-amber-500/20 text-amber-300 rounded-md hover:bg-amber-500/30 transition-colors font-mono text-sm"
+        >
+          Retry Connection
+        </button>
+        <button
+          type="button"
+          onClick={handleLogout}
+          className="mt-4 px-4 py-2 bg-zinc-900/80 border border-red-500/30 text-red-400/90 hover:bg-zinc-800 rounded-md transition-colors font-mono text-sm"
+        >
+          Return to Login
+        </button>
       </div>
     );
   }

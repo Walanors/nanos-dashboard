@@ -1,7 +1,6 @@
 'use client';
 
 import { createContext, useContext, useEffect, useState, useCallback, type ReactNode } from 'react';
-import { StableSocket, type Socket as StableSocketInstance } from '@github/stable-socket';
 import { io, type Socket } from 'socket.io-client';
 
 // Types
@@ -93,19 +92,9 @@ const SocketContext = createContext<SocketContextType>({
   }
 });
 
-// StableSocket delegate type
-interface StableSocketDelegate {
-  socketDidOpen: (socket: StableSocketInstance) => void;
-  socketDidClose: (socket: StableSocketInstance, code?: number, reason?: string) => void;
-  socketDidFinish: (socket: StableSocketInstance) => void;
-  socketDidReceiveMessage: (socket: StableSocketInstance, message: string) => void;
-  socketShouldRetry: (socket: StableSocketInstance, code: number) => boolean;
-}
-
 // Provider component
 export function SocketProvider({ children }: { children: ReactNode }) {
   const [socket, setSocket] = useState<Socket | null>(null);
-  const [stableSocket, setStableSocket] = useState<StableSocket | null>(null);
   const [metrics, setMetrics] = useState<SystemMetrics | null>(null);
   const [connectionState, setConnectionState] = useState<ConnectionState>({
     connected: false,
@@ -179,64 +168,18 @@ export function SocketProvider({ children }: { children: ReactNode }) {
         .catch(error => {
           logConnectionEvent('Server check failed', { error: error.message });
         });
-
-      // Create a StableSocket instance
-      const wsUrl = new URL('/socket.io/', serverUrl);
-      wsUrl.protocol = wsUrl.protocol.replace('http', 'ws');
       
-      // Create the StableSocket delegate for handling events
-      const socketDelegate: StableSocketDelegate = {
-        socketDidOpen: (socket) => {
-          logConnectionEvent('StableSocket opened');
-        },
-        socketDidClose: (socket, code, reason) => {
-          logConnectionEvent('StableSocket closed', { code, reason });
-          setConnectionState(prev => ({
-            ...prev,
-            connected: false,
-            connecting: true
-          }));
-        },
-        socketDidFinish: (socket) => {
-          logConnectionEvent('StableSocket finished (no more retries)');
-          setConnectionState(prev => ({
-            ...prev,
-            connected: false,
-            connecting: false
-          }));
-        },
-        socketDidReceiveMessage: (socket, message) => {
-          logConnectionEvent('StableSocket message', { message });
-        },
-        socketShouldRetry: (socket, code) => {
-          // Retry unless it's a policy violation (1008)
-          const shouldRetry = code !== 1008;
-          logConnectionEvent('StableSocket checking retry', { code, shouldRetry });
-          return shouldRetry;
-        }
-      };
-      
-      // Connection policy
-      const policy = {
-        timeout: 10000,      // 10s connection timeout
-        attempts: 10,        // Max 10 reconnect attempts
-        maxDelay: 30000      // Max 30s between reconnect attempts
-      };
-      
-      // Create the stable socket with the delegate and policy
-      const stable = new StableSocket(wsUrl.toString(), socketDelegate, policy);
-      stable.open();  // Explicitly open the connection
-      
-      // Create socket.io instance
+      // Create socket.io instance with enhanced reliability settings
       const socketInstance = io(serverUrl, {
         auth: { username, password },
         reconnection: true,
-        reconnectionAttempts: 5,
+        reconnectionAttempts: 10,     // Increased from 5
         reconnectionDelay: 1000,
-        reconnectionDelayMax: 5000,
-        timeout: 10000,
+        reconnectionDelayMax: 10000,  // Increased from 5000
+        timeout: 20000,               // Increased from 10000
         path: '/socket.io/',
-        autoConnect: true
+        autoConnect: true,
+        transports: ['websocket', 'polling']  // Explicitly define transports
       });
       
       // Set up Socket.io event listeners
@@ -267,13 +210,49 @@ export function SocketProvider({ children }: { children: ReactNode }) {
         setConnectionState(prev => ({
           ...prev,
           connected: false,
+          connecting: false,
           error: reason === 'io server disconnect' ? 'Server disconnected' : `Disconnected: ${reason}`
         }));
         
         // For certain disconnect reasons, attempt immediate reconnection
-        if (reason === 'io server disconnect') {
+        if (reason === 'io server disconnect' || reason === 'transport close') {
+          // Server forced disconnect, try to reconnect
           socketInstance.connect();
         }
+      });
+      
+      // Handle reconnection attempts
+      socketInstance.io.on('reconnect_attempt', (attempt) => {
+        logConnectionEvent('Socket.io reconnect attempt', { attempt });
+        setConnectionState(prev => ({
+          ...prev,
+          connecting: true,
+          reconnectCount: attempt,
+          lastConnectAttempt: Date.now()
+        }));
+      });
+      
+      socketInstance.io.on('reconnect', (attempt) => {
+        logConnectionEvent('Socket.io reconnected', { attempt });
+        setConnectionState(prev => ({
+          ...prev,
+          connected: true,
+          connecting: false,
+          error: null
+        }));
+      });
+      
+      socketInstance.io.on('reconnect_error', (error) => {
+        logConnectionEvent('Socket.io reconnect error', { error: error.message });
+      });
+      
+      socketInstance.io.on('reconnect_failed', () => {
+        logConnectionEvent('Socket.io reconnect failed');
+        setConnectionState(prev => ({
+          ...prev,
+          connecting: false,
+          error: 'Reconnection failed after all attempts'
+        }));
       });
       
       // Listen for system metrics updates
@@ -284,11 +263,26 @@ export function SocketProvider({ children }: { children: ReactNode }) {
       // Set up heartbeat mechanism
       const pingInterval = setInterval(() => {
         if (socketInstance?.connected) {
+          const pingStartTime = Date.now();
           socketInstance.emit('ping', null, (response: { success: boolean, timestamp: number } | undefined) => {
+            const pingTime = Date.now() - pingStartTime;
+            
             if (!response) {
-              logConnectionEvent('No heartbeat response', { connected: socketInstance.connected });
+              logConnectionEvent('No heartbeat response', { 
+                connected: socketInstance.connected,
+                latency: 'timeout'
+              });
+              
+              // If no response but we think we're connected, force reconnect
               if (socketInstance.connected) {
                 socketInstance.disconnect().connect();
+              }
+            } else {
+              // Only log slow pings (> 1000ms)
+              if (pingTime > 1000) {
+                logConnectionEvent('Slow heartbeat response', { 
+                  latency: `${pingTime}ms`
+                });
               }
             }
           });
@@ -296,7 +290,6 @@ export function SocketProvider({ children }: { children: ReactNode }) {
       }, 30000); // 30s heartbeat interval
       
       // Store references
-      setStableSocket(stable);
       setSocket(socketInstance);
       
       // Return socket to be stored
@@ -325,24 +318,53 @@ export function SocketProvider({ children }: { children: ReactNode }) {
     
     // Clean up existing socket if needed
     if (socket) {
-      socket.disconnect();
-      socket.removeAllListeners();
-    }
-    
-    if (stableSocket) {
+      // First try to reconnect the existing socket
       try {
-        stableSocket.open(); // Use open() instead of reconnect()
+        if (socket.connected) {
+          socket.disconnect().connect();
+        } else {
+          socket.connect();
+        }
+        
+        logConnectionEvent('Attempting to reconnect existing socket');
+        
+        // Set a timeout to check if reconnection was successful
+        setTimeout(() => {
+          if (!socket.connected) {
+            logConnectionEvent('Reconnect timed out, creating new socket');
+            
+            // If not connected after 5 seconds, clean up and create a new socket
+            socket.disconnect();
+            socket.removeAllListeners();
+            
+            // Create a new socket instance
+            const newSocket = initializeSocket();
+            if (newSocket) {
+              setSocket(newSocket);
+            }
+          }
+        }, 5000);
       } catch (error) {
-        logConnectionEvent('StableSocket open error', { error: (error as Error).message });
+        logConnectionEvent('Error during reconnect', { error: (error as Error).message });
+        
+        // If error occurred, clean up and create a new socket
+        socket.disconnect();
+        socket.removeAllListeners();
+        
+        // Create a new socket instance
+        const newSocket = initializeSocket();
+        if (newSocket) {
+          setSocket(newSocket);
+        }
+      }
+    } else {
+      // No existing socket, create a new one
+      const newSocket = initializeSocket();
+      if (newSocket) {
+        setSocket(newSocket);
       }
     }
-    
-    // Create a new socket instance
-    const newSocket = initializeSocket();
-    if (newSocket) {
-      setSocket(newSocket);
-    }
-  }, [socket, stableSocket, initializeSocket, logConnectionEvent]);
+  }, [socket, initializeSocket, logConnectionEvent]);
 
   // Effect to setup and manage socket connection based on credentials
   useEffect(() => {
@@ -363,14 +385,6 @@ export function SocketProvider({ children }: { children: ReactNode }) {
         socket.removeAllListeners();
       }
       
-      if (stableSocket) {
-        try {
-          stableSocket.close(); // Use close() method 
-        } catch (error) {
-          logConnectionEvent('Error closing StableSocket', { error: (error as Error).message });
-        }
-      }
-      
       if (!storedCredentials) {
         setConnectionState(prev => ({
           ...prev,
@@ -379,7 +393,6 @@ export function SocketProvider({ children }: { children: ReactNode }) {
           connecting: false
         }));
         setSocket(null);
-        setStableSocket(null);
         return;
       }
       
@@ -398,18 +411,8 @@ export function SocketProvider({ children }: { children: ReactNode }) {
         socket.disconnect();
         socket.removeAllListeners();
       }
-      
-      if (stableSocket) {
-        try {
-          stableSocket.close(); // Use close() method
-        } catch (error) {
-          logConnectionEvent('Error closing StableSocket during cleanup', { 
-            error: (error as Error).message 
-          });
-        }
-      }
     };
-  }, [credentialsBase64, initializeSocket, socket, stableSocket, logConnectionEvent]);
+  }, [credentialsBase64, initializeSocket, socket, logConnectionEvent]);
 
   // Execute command via socket
   const executeCommand = useCallback((command: string): Promise<CommandResult> => {
