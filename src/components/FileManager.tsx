@@ -386,7 +386,35 @@ export default function FileManager() {
   // Drag event handlers
   const handleDragStart = (file: FileEntry) => (event: React.DragEvent) => {
     setDraggedFile(file);
+    
+    // Set the file path as drag data
     event.dataTransfer.setData('text/plain', file.path);
+    
+    // Store information about whether we're dragging selected files
+    if (selectedFiles.has(file.path) && selectedFiles.size > 1) {
+      // We're dragging a file that's part of a multi-selection
+      event.dataTransfer.setData('application/nanos-dashboard-files', JSON.stringify({
+        isMultiDrag: true,
+        count: selectedFiles.size
+      }));
+      
+      // Create a custom drag image for multiple files
+      try {
+        const dragElement = document.createElement('div');
+        dragElement.classList.add('bg-amber-500/30', 'text-amber-300', 'p-2', 'rounded', 'text-xs', 'font-mono');
+        dragElement.textContent = `Moving ${selectedFiles.size} items`;
+        document.body.appendChild(dragElement);
+        event.dataTransfer.setDragImage(dragElement, 15, 15);
+        
+        // Clean up after a small delay
+        setTimeout(() => {
+          document.body.removeChild(dragElement);
+        }, 100);
+      } catch (error) {
+        console.error('Error creating custom drag image:', error);
+      }
+    }
+    
     event.dataTransfer.effectAllowed = 'move';
   };
 
@@ -419,41 +447,96 @@ export default function FileManager() {
     
     if (!draggedFile) return;
 
-    const sourcePath = draggedFile.path;
-    const fileName = sourcePath.split('/').pop() || '';
-    const destinationPath = `${targetDir}/${fileName}`;
-    
     setIsMoving(true);
-
+    
     try {
-      const response = await fetch('/api/files/move', {
-        method: 'POST',
-        headers: {
-          'Content-Type': 'application/json',
-          ...getAuthHeader(),
-        },
-        body: JSON.stringify({ 
-          sourcePath,
-          destinationPath 
-        }),
-      });
-
-      if (!response.ok) {
-        throw new Error(`Failed to move file: ${response.statusText}`);
-      }
-
-      const data = await response.json();
+      // Check if this is a multi-file drag operation
+      const multiDragData = event.dataTransfer.getData('application/nanos-dashboard-files');
+      const isMultiDrag = multiDragData ? JSON.parse(multiDragData).isMultiDrag : false;
       
-      if (data.success) {
-        toast.success('File moved successfully');
-        // Reload current directory contents
-        loadDirectoryContents(currentPath);
+      if (isMultiDrag && selectedFiles.has(draggedFile.path)) {
+        // Move all selected files
+        const filesToMove = Array.from(selectedFiles);
+        let successCount = 0;
+        let errorCount = 0;
+        
+        // Create a progress toast that can be updated
+        const toastId = toast.loading(`Moving ${filesToMove.length} items...`);
+        
+        for (let i = 0; i < filesToMove.length; i++) {
+          const sourcePath = filesToMove[i];
+          const fileName = sourcePath.split('/').pop() || '';
+          const destinationPath = `${targetDir}/${fileName}`;
+          
+          try {
+            const response = await fetch('/api/files/move', {
+              method: 'POST',
+              headers: {
+                'Content-Type': 'application/json',
+                ...getAuthHeader(),
+              },
+              body: JSON.stringify({ 
+                sourcePath,
+                destinationPath 
+              }),
+            });
+            
+            if (response.ok) {
+              successCount++;
+              // Update progress
+              toast.loading(`Moving items... ${successCount}/${filesToMove.length}`, { id: toastId });
+            } else {
+              errorCount++;
+            }
+          } catch (error) {
+            errorCount++;
+            console.error(`Error moving file ${fileName}:`, error);
+          }
+        }
+        
+        // Update final toast
+        if (errorCount === 0) {
+          toast.success(`Successfully moved ${successCount} items`, { id: toastId });
+        } else {
+          toast.error(`Moved ${successCount} items, ${errorCount} failed`, { id: toastId });
+        }
+        
       } else {
-        throw new Error(data.error || 'Failed to move file');
+        // Just move the single dragged file
+        const sourcePath = draggedFile.path;
+        const fileName = sourcePath.split('/').pop() || '';
+        const destinationPath = `${targetDir}/${fileName}`;
+        
+        const response = await fetch('/api/files/move', {
+          method: 'POST',
+          headers: {
+            'Content-Type': 'application/json',
+            ...getAuthHeader(),
+          },
+          body: JSON.stringify({ 
+            sourcePath,
+            destinationPath 
+          }),
+        });
+
+        if (!response.ok) {
+          throw new Error(`Failed to move file: ${response.statusText}`);
+        }
+
+        const data = await response.json();
+        
+        if (data.success) {
+          toast.success('File moved successfully');
+        } else {
+          throw new Error(data.error || 'Failed to move file');
+        }
       }
+      
+      // Reload current directory contents after all moves
+      loadDirectoryContents(currentPath);
     } catch (error) {
       toast.error((error as Error).message);
-      console.error('Error moving file:', error);
+      console.error('Error moving file(s):', error);
     } finally {
       setIsMoving(false);
       setDraggedFile(null);
