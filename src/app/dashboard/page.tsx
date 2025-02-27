@@ -149,6 +149,12 @@ export default function DashboardPage() {
               >
                 Server Configuration
               </Link>
+              <Link 
+                href="/dashboard/modules" 
+                className="block w-full px-3 py-2 bg-amber-500/20 text-amber-300 rounded hover:bg-amber-500/30 transition-colors font-mono text-sm text-center"
+              >
+                Modules Manager
+              </Link>
               {/* Add more action buttons here */}
             </div>
           </div>
