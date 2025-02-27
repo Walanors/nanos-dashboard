@@ -98,7 +98,7 @@ interface SocketContextType {
   logs: string[];
   isSubscribedToLogs: boolean;
   isLoadingLogs: boolean;
-  subscribeToLogs: (options?: { initialLines?: number; fullHistory?: boolean }) => Promise<void>;
+  subscribeToLogs: (options?: { initialLines?: number; fullHistory?: boolean; realtime?: boolean }) => Promise<void>;
   unsubscribeFromLogs: () => void;
   clearLogs: () => void;
 }
@@ -699,41 +699,78 @@ export function SocketProvider({ children }: { children: ReactNode }) {
   const sendServerCommand = useCallback((command: string): Promise<ServerCommandResult> => {
     return new Promise((resolve, reject) => {
       if (!socket || !connectionState.connected) {
+        console.error('Cannot send command: Socket not connected');
         reject(new Error('Socket not connected'));
         return;
       }
       
       if (!command || typeof command !== 'string') {
+        console.error('Cannot send command: Invalid command format');
         reject(new Error('Invalid command'));
         return;
       }
       
-      console.log('Sending server command:', command); // Debug log
-      
-      const timeoutId = setTimeout(() => {
-        reject(new Error('Server command request timed out'));
-      }, 10000);
-      
-      socket.emit('server_command', command, (response: {
-        success: boolean;
-        message?: string;
-        error?: string;
-      }) => {
-        clearTimeout(timeoutId);
+      // Check server status before sending command
+      if (!serverStatus?.running) {
+        console.warn('Attempting to send command but serverStatus.running is false:', serverStatus);
         
-        console.log('Server command response:', response); // Debug log
-        
-        if (response.success) {
-          resolve({
-            success: true,
-            message: response.message || 'Command sent successfully'
+        // Force refresh server status before rejecting
+        fetchServerStatus()
+          .then(updatedStatus => {
+            console.log('Updated server status before command:', updatedStatus);
+            
+            if (!updatedStatus.running) {
+              reject(new Error('Server is not running'));
+              return;
+            }
+            
+            // If server is actually running after refresh, continue with command
+            sendCommandToServer(command, resolve, reject);
+          })
+          .catch(error => {
+            console.error('Failed to refresh server status:', error);
+            reject(new Error('Failed to verify server status'));
           });
-        } else {
-          reject(new Error(response.error || response.message || 'Failed to send command'));
-        }
-      });
+        return;
+      }
+      
+      // If server status is already confirmed as running, send command directly
+      sendCommandToServer(command, resolve, reject);
     });
-  }, [socket, connectionState.connected]);
+  }, [socket, connectionState.connected, serverStatus, fetchServerStatus]);
+  
+  // Helper function to actually send the command to the server
+  const sendCommandToServer = useCallback((command: string, resolve: (result: ServerCommandResult) => void, reject: (error: Error) => void) => {
+    if (!socket) {
+      reject(new Error('Socket not available'));
+      return;
+    }
+    
+    console.log('Sending server command:', command); // Debug log
+    
+    const timeoutId = setTimeout(() => {
+      reject(new Error('Server command request timed out'));
+    }, 10000);
+    
+    socket.emit('server_command', command, (response: {
+      success: boolean;
+      message?: string;
+      error?: string;
+    }) => {
+      clearTimeout(timeoutId);
+      
+      console.log('Server command response:', response); // Debug log
+      
+      if (response.success) {
+        resolve({
+          success: true,
+          message: response.message || 'Command sent successfully'
+        });
+      } else {
+        reject(new Error(response.error || response.message || 'Failed to send command'));
+      }
+    });
+  }, [socket]);
 
   // Log functions
   const clearLogs = useCallback(() => {
@@ -755,7 +792,7 @@ export function SocketProvider({ children }: { children: ReactNode }) {
     });
   }, []);
   
-  const subscribeToLogs = useCallback((options: { initialLines?: number; fullHistory?: boolean } = {}): Promise<void> => {
+  const subscribeToLogs = useCallback((options: { initialLines?: number; fullHistory?: boolean; realtime?: boolean } = {}): Promise<void> => {
     return new Promise((resolve, reject) => {
       if (!socket || !connectionState.connected) {
         reject(new Error('Socket not connected'));
@@ -782,12 +819,7 @@ export function SocketProvider({ children }: { children: ReactNode }) {
       }, 5000); // 5 seconds timeout instead of default
       
       // Subscribe to logs with real-time option if available
-      const subscribeOptions = {
-        ...options,
-        realtime: true // Request real-time updates if the server supports it
-      };
-      
-      socket.emit('subscribe_logs', subscribeOptions, (response: {
+      socket.emit('subscribe_logs', options, (response: {
         success: boolean;
         message?: string;
         error?: string;
@@ -819,9 +851,14 @@ export function SocketProvider({ children }: { children: ReactNode }) {
   // Effect to check server status when socket connects
   useEffect(() => {
     if (socket && connectionState.connected) {
-      fetchServerStatus().catch(error => {
-        console.error('Error fetching server status:', error);
-      });
+      console.log('Socket connected, fetching server status');
+      fetchServerStatus()
+        .then(status => {
+          console.log('Initial server status:', status);
+        })
+        .catch(error => {
+          console.error('Error fetching server status:', error);
+        });
     }
   }, [socket, connectionState.connected, fetchServerStatus]);
 

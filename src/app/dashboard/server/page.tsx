@@ -192,9 +192,27 @@ export default function ServerPage() {
         xtermRef.current.writeln(`\x1b[90mExecuting: ${cmd}\x1b[0m`);
       }
       
+      // Check if server status is being loaded
+      if (isLoadingServerStatus) {
+        console.log('Server status is currently loading, waiting briefly...');
+        // Wait a moment for status to load
+        await new Promise(resolve => setTimeout(resolve, 500));
+      }
+      
+      // Force refresh server status before sending command
+      console.log('Current server status before refresh:', serverStatus);
+      let currentStatus = serverStatus;
+      
+      try {
+        currentStatus = await fetchServerStatus();
+        console.log('Refreshed server status:', currentStatus);
+      } catch (statusError) {
+        console.error('Failed to refresh server status:', statusError);
+      }
+      
       // Check if server is running and warn if not
-      if (!serverStatus?.running) {
-        console.log('Cannot execute command - server not running'); // Debug log
+      if (!currentStatus?.running) {
+        console.log('Cannot execute command - server not running according to status check'); // Debug log
         if (xtermRef.current) {
           xtermRef.current.writeln('\x1b[31mError: Server is not running\x1b[0m');
           xtermRef.current.write('\x1b[33m$ \x1b[0m');
@@ -204,15 +222,31 @@ export default function ServerPage() {
       
       // Actually send the command to the server
       console.log('Sending command to server:', cmd); // Debug log
-      const result = await sendServerCommand(cmd);
-      console.log('Command result:', result); // Debug log
+      setIsSendingCommand(true);
       
-      // Show prompt after command execution
-      if (xtermRef.current) {
-        if (result?.message) {
-          xtermRef.current.writeln(`\x1b[32m${result.message}\x1b[0m`);
+      try {
+        const result = await sendServerCommand(cmd);
+        console.log('Command result:', result); // Debug log
+        
+        // Show prompt after command execution
+        if (xtermRef.current) {
+          if (result?.message) {
+            xtermRef.current.writeln(`\x1b[32m${result.message}\x1b[0m`);
+          } else {
+            xtermRef.current.writeln('\x1b[32mCommand executed successfully\x1b[0m');
+          }
+          xtermRef.current.write('\x1b[33m$ \x1b[0m');
         }
-        xtermRef.current.write('\x1b[33m$ \x1b[0m');
+      } catch (cmdError) {
+        console.error('Command execution error:', cmdError);
+        const errorMessage = cmdError instanceof Error ? cmdError.message : 'An unknown error occurred';
+        
+        if (xtermRef.current) {
+          xtermRef.current.writeln(`\x1b[31mError: ${errorMessage}\x1b[0m`);
+          xtermRef.current.write('\x1b[33m$ \x1b[0m');
+        }
+      } finally {
+        setIsSendingCommand(false);
       }
     } catch (error: unknown) {
       console.error('Failed to send command:', error);
@@ -230,9 +264,14 @@ export default function ServerPage() {
   // Subscribe to logs when component mounts
   useEffect(() => {
     if (!isSubscribedToLogs) {
-      // Subscribe with a smaller batch size for more frequent updates
-      subscribeToLogs({ initialLines: 50 })
+      console.log('Subscribing to server logs with real-time option');
+      // Subscribe with a smaller batch size and real-time option for more frequent updates
+      subscribeToLogs({ 
+        initialLines: 50,
+        realtime: true
+      })
         .then(() => {
+          console.log('Successfully subscribed to server logs');
           if (xtermRef.current) {
             xtermRef.current.writeln('\x1b[32mConnected to server logs\x1b[0m');
             xtermRef.current.write('\x1b[33m$ \x1b[0m');
@@ -253,6 +292,7 @@ export default function ServerPage() {
     // Clean up subscription when component unmounts
     return () => {
       if (isSubscribedToLogs) {
+        console.log('Unsubscribing from server logs');
         unsubscribeFromLogs();
       }
     };
@@ -266,8 +306,11 @@ export default function ServerPage() {
       const newLogs = logs.slice(lastLogIndex);
       
       if (newLogs.length > 0) {
-        // Save current line content
+        console.log(`Displaying ${newLogs.length} new log entries`);
+        
+        // Save current line content and cursor position
         const currentLine = xtermRef.current.buffer.active.getLine(xtermRef.current.buffer.active.cursorY)?.translateToString() || '';
+        const cursorX = xtermRef.current.buffer.active.cursorX;
         
         // Clear current line
         xtermRef.current.write('\x1b[2K\r');
@@ -282,6 +325,14 @@ export default function ServerPage() {
         if (currentLine.length > 2) {
           const command = currentLine.substring(2);
           xtermRef.current.write(command);
+          
+          // Try to restore cursor position if needed
+          if (cursorX > 2 && cursorX < currentLine.length) {
+            const moveCursor = cursorX - (command.length + 2);
+            if (moveCursor < 0) {
+              xtermRef.current.write(`\x1b[${Math.abs(moveCursor)}D`); // Move cursor left
+            }
+          }
         }
       }
     }
