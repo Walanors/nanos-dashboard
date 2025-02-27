@@ -65,6 +65,163 @@ input[type="checkbox"]:focus {
   box-shadow: 0 0 0 2px rgba(217, 119, 6, 0.2); /* amber-500/20 */
 }
 
+/* Custom select/dropdown styles */
+select {
+  appearance: none;
+  -webkit-appearance: none;
+  background-color: rgba(31, 41, 55, 0.5); /* gray-800/50 */
+  border: 1px solid rgba(217, 119, 6, 0.2); /* amber-500/20 */
+  border-radius: 0.25rem;
+  padding: 0.5rem 2.5rem 0.5rem 0.75rem;
+  color: rgb(209, 213, 219); /* gray-300 */
+  font-family: ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, monospace;
+  font-size: 0.875rem;
+  transition: all 0.2s ease;
+  cursor: pointer;
+  background-image: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' fill='none' viewBox='0 0 24 24' stroke='rgba(252, 211, 77, 0.6)'%3E%3Cpath stroke-linecap='round' stroke-linejoin='round' stroke-width='2' d='M19 9l-7 7-7-7'%3E%3C/path%3E%3C/svg%3E");
+  background-repeat: no-repeat;
+  background-position: right 0.75rem center;
+  background-size: 1rem;
+}
+
+select:hover {
+  border-color: rgba(217, 119, 6, 0.4); /* amber-500/40 */
+  background-color: rgba(31, 41, 55, 0.6); /* gray-800/60 */
+}
+
+select:focus {
+  outline: none;
+  border-color: rgba(217, 119, 6, 0.5); /* amber-500/50 */
+  box-shadow: 0 0 0 2px rgba(217, 119, 6, 0.2); /* amber-500/20 */
+}
+
+/* Style the dropdown options */
+select option {
+  background-color: rgba(0, 0, 0, 0.95); /* black/95 */
+  color: rgb(209, 213, 219); /* gray-300 */
+  padding: 0.5rem;
+  font-family: ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, monospace;
+}
+
+select option:hover {
+  background-color: rgba(217, 119, 6, 0.3); /* amber-500/30 */
+  color: rgb(252, 211, 77); /* amber-300 */
+}
+
+select option:checked {
+  background-color: rgba(217, 119, 6, 0.3); /* amber-500/30 */
+  color: rgb(252, 211, 77); /* amber-300 */
+}
+
+/* Custom styles for React Select components */
+.react-select-container .react-select__control {
+  background-color: rgba(31, 41, 55, 0.5); /* gray-800/50 */
+  border: 1px solid rgba(217, 119, 6, 0.2); /* amber-500/20 */
+  border-radius: 0.25rem;
+  box-shadow: none;
+  transition: all 0.2s ease;
+}
+
+.react-select-container .react-select__control:hover {
+  border-color: rgba(217, 119, 6, 0.4); /* amber-500/40 */
+  background-color: rgba(31, 41, 55, 0.6); /* gray-800/60 */
+}
+
+.react-select-container .react-select__control--is-focused {
+  border-color: rgba(217, 119, 6, 0.5); /* amber-500/50 */
+  box-shadow: 0 0 0 1px rgba(217, 119, 6, 0.4); /* amber-500/40 */
+  background-color: rgba(31, 41, 55, 0.6); /* gray-800/60 */
+}
+
+.react-select-container .react-select__menu {
+  background-color: rgba(0, 0, 0, 0.95); /* black/95 */
+  border: 1px solid rgba(217, 119, 6, 0.2); /* amber-500/20 */
+  border-radius: 0.25rem;
+  box-shadow: 0 4px 12px rgba(0, 0, 0, 0.5);
+  margin-top: 0.25rem;
+  z-index: 100;
+}
+
+.react-select-container .react-select__option {
+  background-color: transparent;
+  color: rgb(209, 213, 219); /* gray-300 */
+  cursor: pointer;
+  font-family: ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, monospace;
+  font-size: 0.875rem;
+  padding: 0.5rem 0.75rem;
+}
+
+.react-select-container .react-select__option--is-focused {
+  background-color: rgba(217, 119, 6, 0.2); /* amber-500/20 */
+}
+
+.react-select-container .react-select__option--is-selected {
+  background-color: rgba(217, 119, 6, 0.3); /* amber-500/30 */
+  color: rgb(252, 211, 77); /* amber-300 */
+}
+
+.react-select-container .react-select__input {
+  color: rgb(209, 213, 219); /* gray-300 */
+}
+
+.react-select-container .react-select__single-value {
+  color: rgb(209, 213, 219); /* gray-300 */
+  font-family: ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, monospace;
+}
+
+.react-select-container .react-select__multi-value {
+  background-color: rgba(217, 119, 6, 0.2); /* amber-500/20 */
+  border-radius: 0.25rem;
+}
+
+.react-select-container .react-select__multi-value__label {
+  color: rgb(252, 211, 77); /* amber-300 */
+  font-family: ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, monospace;
+  font-size: 0.75rem;
+  padding: 0.125rem 0.25rem;
+}
+
+.react-select-container .react-select__multi-value__remove {
+  color: rgba(252, 211, 77, 0.7); /* amber-300/70 */
+  padding: 0 0.25rem;
+  cursor: pointer;
+}
+
+.react-select-container .react-select__multi-value__remove:hover {
+  background-color: rgba(220, 38, 38, 0.3); /* red-600/30 */
+  color: rgb(252, 165, 165); /* red-300 */
+  border-radius: 0 0.25rem 0.25rem 0;
+}
+
+.react-select-container .react-select__indicator {
+  color: rgba(252, 211, 77, 0.5); /* amber-300/50 */
+}
+
+.react-select-container .react-select__indicator:hover {
+  color: rgba(252, 211, 77, 0.8); /* amber-300/80 */
+}
+
+.react-select-container .react-select__indicator-separator {
+  background-color: rgba(217, 119, 6, 0.3); /* amber-500/30 */
+}
+
+.react-select-container .react-select__placeholder {
+  color: rgba(209, 213, 219, 0.5); /* gray-300/50 */
+  font-family: ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, monospace;
+}
+
+.react-select-container .react-select__clear-indicator {
+  color: rgba(252, 211, 77, 0.5); /* amber-300/50 */
+}
+
+.react-select-container .react-select__clear-indicator:hover {
+  color: rgba(220, 38, 38, 0.6); /* red-600/60 */
+}
+
+.react-select-container .react-select__loading-indicator {
+  color: rgb(252, 211, 77); /* amber-300 */
+}
+
 /* Custom scrollbar styles */
 /* Webkit browsers (Chrome, Safari, Edge) */
 ::-webkit-scrollbar {
