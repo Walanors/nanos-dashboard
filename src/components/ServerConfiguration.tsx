@@ -329,8 +329,6 @@ export default function ServerConfiguration() {
 
           throw new Error('Invalid configuration structure after parsing');
         }
-
-        toast.success('Config validation passed');
         setConfig(typedConfig);
       } catch (parseError) {
         console.error('TOML Parse error:', parseError);

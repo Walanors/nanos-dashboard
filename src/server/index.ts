@@ -21,6 +21,7 @@ import commandRouter from './handlers/commands';
 import fileRouter from './handlers/files';
 import systemRouter from './handlers/system';
 import userRouter from './handlers/users';
+import serverRouter from './handlers/server';
 import { configureSocketHandlers } from './socket/handlers';
 
 // Define interface for custom type
@@ -170,6 +171,7 @@ app.prepare().then(() => {
   server.use('/api/files', authenticate, fileRouter);
   server.use('/api/system', authenticate, systemRouter);
   server.use('/api/users', authenticate, userRouter);
+  server.use('/api/server', authenticate, serverRouter);
   
   // Handle Next.js requests
   server.all('*', (req: express.Request, res: express.Response) => {

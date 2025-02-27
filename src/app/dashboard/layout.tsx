@@ -208,6 +208,7 @@ export default function DashboardLayout({
             {[
               { path: '', label: 'Overview', defaultActive: true },
               { path: 'configuration', label: 'Configuration' },
+              { path: 'server', label: 'Server' },
               { path: 'console', label: 'Console' },
               { path: 'modules', label: 'Modules' },
               { path: 'settings', label: 'Settings' }
