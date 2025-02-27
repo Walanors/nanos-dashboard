@@ -1,11 +1,13 @@
 'use client';
 
-import { useEffect, useState } from 'react';
-import { useRouter, usePathname } from 'next/navigation';
-import { useSocket } from '@/hooks/useSocket';
-import SocketDebugger from '@/components/SocketDebugger';
-import Image from 'next/image';
+import { useState, useEffect } from 'react';
 import Link from 'next/link';
+import { usePathname, useRouter } from 'next/navigation';
+import { useSocket } from '@/hooks/useSocket';
+import { useUser } from '@/hooks/useUser';
+import NanosOnboarding from '@/components/NanosOnboarding';
+import SocketDebugger from '@/components/SocketDebugger';
+import { toast } from 'react-hot-toast';
 
 export default function DashboardLayout({
   children,
@@ -14,127 +16,123 @@ export default function DashboardLayout({
 }) {
   const router = useRouter();
   const pathname = usePathname();
-  const [isLoading, setIsLoading] = useState(true);
-  const [userData, setUserData] = useState<{ username: string } | null>(null);
-  const [showDebugger, setShowDebugger] = useState(false);
+  const socketContext = useSocket();
+  const { metrics, isConnected, isConnecting, connectionError, reconnect, executeCommand, connectionState } = socketContext;
+  const [activeMenu, setActiveMenu] = useState<string>('');
+  const { userData, loading: userLoading } = useUser();
+  const [isUpdating, setIsUpdating] = useState(false);
   const [connectionAttempts, setConnectionAttempts] = useState(0);
-  
-  // Get socket connection status
-  const { isConnected, isConnecting, connectionState, reconnect } = useSocket();
+  const [showRetryButton, setShowRetryButton] = useState(false);
 
-  // Effect for checking authentication and loading user data
+  // Set up a timer to show retry button after multiple connection attempts
   useEffect(() => {
-    const credentials = sessionStorage.getItem('credentials');
-    
-    if (!credentials) {
-      console.log('No credentials found in layout, redirecting to login');
-      router.push('/');
-      return;
-    }
-    
-    try {
-      // Handle both JSON and Base64 encoded credentials
-      let username = '';
+    if (isConnecting && !isConnected) {
+      setConnectionAttempts(prev => prev + 1);
       
-      // Check if the credentials are in JSON format
-      if (credentials.startsWith('{')) {
-        const parsed = JSON.parse(credentials);
-        username = parsed.username || 'Admin';
-      } else {
-        // Handle Base64 encoded credentials (username:password format)
-        try {
-          // For Basic Auth format (username:password)
-          const decoded = atob(credentials);
-          username = decoded.split(':')[0] || 'Admin';
-        } catch (e) {
-          // If not valid Base64, just use it as is
-          username = credentials;
-        }
+      // After 3 attempts, show the retry button
+      if (connectionAttempts >= 3) {
+        setShowRetryButton(true);
       }
-      
-      setUserData({ username });
-      setIsLoading(false);
-    } catch (error) {
-      console.error('Error parsing credentials:', error);
-      sessionStorage.removeItem('credentials');
-      router.push('/');
+    } else if (isConnected) {
+      // Reset when connected
+      setConnectionAttempts(0);
+      setShowRetryButton(false);
     }
-  }, [router]);
+  }, [isConnecting, isConnected, connectionAttempts]);
 
-  // Effect for tracking connection attempts
+  // Format bytes to human-readable size
+  const formatBytes = (bytes: number): string => {
+    if (!bytes || bytes === 0) return '0 Bytes';
+    
+    const k = 1024;
+    const sizes = ['Bytes', 'KB', 'MB', 'GB', 'TB'];
+    const i = Math.floor(Math.log(bytes) / Math.log(k));
+    
+    return `${Number.parseFloat((bytes / (k ** i)).toFixed(1))} ${sizes[i]}`;
+  };
+
   useEffect(() => {
-    if (connectionState.reconnectCount > connectionAttempts) {
-      setConnectionAttempts(connectionState.reconnectCount);
-    }
-  }, [connectionAttempts, connectionState.reconnectCount]);
+    // Extract the active menu from pathname
+    const path = pathname.split('/')[2] || '';
+    setActiveMenu(path || 'overview');
+  }, [pathname]);
 
   const handleLogout = () => {
     sessionStorage.removeItem('credentials');
     router.push('/');
   };
 
-  const isActivePath = (path: string) => {
-    if (path === '/dashboard' && pathname === '/dashboard') {
-      return true;
+  // Calculate RAM percentage
+  const ramPercentage = metrics ? 
+    Math.round((metrics.memory.used / metrics.memory.total) * 100) : 0;
+
+  // Use the actual CPU usage instead of load average
+  const cpuPercentage = metrics ? Math.round(metrics.cpu.usage) : 0;
+
+  // Handle update function
+  const handleUpdate = async () => {
+    if (!executeCommand) return;
+    
+    setIsUpdating(true);
+    try {
+      // Execute git pull to update the codebase
+      const result = await executeCommand('sudo git pull');
+      if (result.error) {
+        throw new Error(result.error);
+      }
+
+      // Install all dependencies including dev dependencies with sudo
+      const installPackages = await executeCommand('sudo npm install --include=dev');
+      if (installPackages.error) {
+        throw new Error(installPackages.error);
+      }
+      
+      // Rebuild the application after update with sudo
+      const buildResult = await executeCommand('sudo npm run build');
+      if (buildResult.error) {
+        throw new Error(buildResult.error);
+      }
+      toast.success('Update installed successfully. The service will restart momentarily. You will be able to refresh the page to see the changes.');
+      // Restart the service
+      const restartResult = await executeCommand('sudo systemctl restart nanos-dashboard.service');
+      if (restartResult.error) {
+        throw new Error(restartResult.error);
+      }
+      
+    } catch (error) {
+      console.error('Update failed:', error);
+      toast.error(`Update failed: ${(error as Error).message}`);
+    } finally {
+      setIsUpdating(false);
     }
-    if (path !== '/dashboard' && pathname?.startsWith(path)) {
-      return true;
-    }
-    return false;
   };
 
-  // Show loading screen until we have both user data and socket connection
-  if (isLoading) {
+  // Show loading state for either user loading or waiting for socket connection
+  if (userLoading || (!isConnected && (isConnecting || connectionAttempts < 3))) {
     return (
-      <div className="flex justify-center items-center h-screen bg-black">
-        <div className="animate-pulse text-amber-400 text-lg font-mono">
-          <span className="mr-2">$</span>
-          Loading user data...
-        </div>
-      </div>
-    );
-  }
-
-  // If we're not connected yet, show a loading screen with connection info
-  if (isConnecting) {
-    return (
-      <div className="flex flex-col justify-center items-center h-screen bg-black">
-        <div className="mb-8">
-          <Image 
-            src="/nanosLogo.png" 
-            alt="Nanos Logo" 
-            width={100} 
-            height={100} 
-            priority
-          />
-        </div>
+      <div className="flex flex-col min-h-screen items-center justify-center bg-gradient-to-br from-black to-zinc-900">
         <div className="animate-pulse text-amber-400 text-lg font-mono mb-4">
           <span className="mr-2">$</span>
-          Establishing connection to server...
+          {userLoading ? 'Loading user data...' : 'Establishing server connection...'}
         </div>
-        
-        {connectionAttempts > 0 && (
-          <div className="text-amber-400/70 text-sm font-mono mb-4">
-            Connection attempt {connectionAttempts}...
+        {!userLoading && isConnecting && (
+          <div className="text-xs text-amber-400/70 font-mono mt-2">
+            Attempt {connectionState.reconnectCount || connectionAttempts + 1} of 10
           </div>
         )}
-        
-        {connectionState.error && (
-          <div className="bg-red-900/20 border border-red-500/30 p-3 rounded max-w-md text-center mb-4">
-            <p className="text-red-400 text-sm mb-1">
-              Connection error: {connectionState.error}
-            </p>
-            <p className="text-amber-400/60 text-xs">
-              Trying to reconnect automatically...
-            </p>
+        {!userLoading && connectionError && (
+          <div className="text-xs text-red-400 font-mono mt-2 max-w-md text-center">
+            {connectionError}
           </div>
         )}
-        
-        {connectionAttempts >= 3 && (
+        {showRetryButton && (
           <button
             type="button"
-            onClick={reconnect}
-            className="px-4 py-2 bg-amber-500/20 text-amber-300 rounded mt-2 hover:bg-amber-500/30 transition-colors"
+            onClick={() => {
+              reconnect();
+              setConnectionAttempts(0);
+            }}
+            className="mt-6 px-4 py-2 bg-amber-500/20 text-amber-300 rounded-md hover:bg-amber-500/30 transition-colors font-mono text-sm"
           >
             Retry Connection
           </button>
@@ -143,189 +141,197 @@ export default function DashboardLayout({
     );
   }
 
-  // Show permanent error screen after several failed attempts
-  if (!isConnected && connectionAttempts >= 5) {
+  // Show connection error state if we've tried multiple times and still failed
+  if (!isConnected && connectionAttempts >= 3) {
     return (
-      <div className="flex flex-col justify-center items-center h-screen bg-black">
-        <div className="mb-8">
-          <Image 
-            src="/nanosLogo.png" 
-            alt="Nanos Logo" 
-            width={100} 
-            height={100} 
-            priority
-          />
+      <div className="flex flex-col min-h-screen items-center justify-center bg-gradient-to-br from-black to-zinc-900">
+        <div className="text-red-400 text-lg font-mono mb-4">
+          <span className="mr-2">!</span>
+          Unable to establish server connection
         </div>
-        <div className="text-red-400 text-2xl font-mono mb-4">
-          Connection Failed
+        <div className="text-xs text-amber-400/70 font-mono mt-2 mb-6 max-w-md text-center">
+          {connectionError || "The dashboard couldn't connect to the server after multiple attempts."}
         </div>
-        
-        <div className="bg-red-900/20 border border-red-500/30 p-4 rounded max-w-md text-center mb-6">
-          <p className="text-amber-300 mb-2">
-            Unable to establish a connection to the server after multiple attempts.
-          </p>
-          <p className="text-amber-400/60 text-sm mb-4">
-            Error: {connectionState.error || 'Unknown connection error'}
-          </p>
-          <div className="text-amber-400/80 text-xs text-left bg-black/50 p-2 rounded mb-3">
-            <p className="mb-1">Troubleshooting tips:</p>
-            <ul className="list-disc pl-4 space-y-1">
-              <li>Verify the server is running</li>
-              <li>Check your network connection</li>
-              <li>Make sure your credentials are correct</li>
-              <li>Check if the server address is correct</li>
-            </ul>
-          </div>
-        </div>
-        
-        <div className="flex space-x-4">
-          <button
-            type="button"
-            onClick={reconnect}
-            className="px-4 py-2 bg-amber-500/20 text-amber-300 rounded hover:bg-amber-500/30 transition-colors"
-          >
-            Try Again
-          </button>
-          <button 
-            type="button"
-            onClick={handleLogout}
-            className="px-4 py-2 bg-red-500/20 text-red-300 rounded hover:bg-red-500/30 transition-colors"
-          >
-            Return to Login
-          </button>
+        <button
+          type="button"
+          onClick={() => {
+            reconnect();
+            setConnectionAttempts(0);
+            setShowRetryButton(false);
+          }}
+          className="px-4 py-2 bg-amber-500/20 text-amber-300 rounded-md hover:bg-amber-500/30 transition-colors font-mono text-sm"
+        >
+          Retry Connection
+        </button>
+        <button
+          type="button"
+          onClick={handleLogout}
+          className="mt-4 px-4 py-2 bg-zinc-900/80 border border-red-500/30 text-red-400/90 hover:bg-zinc-800 rounded-md transition-colors font-mono text-sm"
+        >
+          Return to Login
+        </button>
+      </div>
+    );
+  }
+
+  // If user hasn't completed onboarding, render the onboarding component
+  if (userData && !userData.onboardingCompleted) {
+    return (
+      <div className="min-h-screen bg-gradient-to-br from-black to-zinc-900 flex items-center justify-center p-6">
+        <div className="w-full max-w-4xl">
+          <NanosOnboarding />
         </div>
       </div>
     );
   }
-  
+
+  // Regular dashboard layout
   return (
-    <div className="flex h-screen bg-black text-amber-300">
+    <div className="flex min-h-screen bg-gradient-to-br from-black to-zinc-900 text-amber-50">
       {/* Sidebar */}
-      <div className="w-64 bg-black border-r border-amber-500/20 flex flex-col">
-        {/* Logo Area */}
-        <div className="p-4 border-b border-amber-500/20 flex items-center space-x-3">
-          <Image 
-            src="/nanosLogo.png" 
-            alt="Nanos Logo" 
-            width={40} 
-            height={40} 
-            priority
-          />
-          <div className="font-mono text-lg text-amber-400">Nanos Admin</div>
-        </div>
-        
-        {/* User Info */}
+      <div className="w-64 border-r border-amber-500/20 backdrop-blur-sm backdrop-filter bg-black/60 flex flex-col">
+        {/* Logo area */}
         <div className="p-4 border-b border-amber-500/20">
-          <div className="font-mono text-sm text-amber-400/80">
-            Logged in as:
-          </div>
-          <div className="font-mono font-bold">
-            {userData?.username || 'Admin'}
+          <div className="flex items-center">
+            <div className="text-xl font-bold text-amber-400">
+              nanos_
+            </div>
+            <div className="ml-2 text-xs text-amber-400/50 font-mono self-end">
+              DASHBOARD
+            </div>
           </div>
         </div>
-        
+
         {/* Navigation */}
-        <nav className="flex-grow p-4">
-          <ul className="space-y-2">
-            <li>
-              <Link 
-                href="/dashboard"
-                className={`block py-2 px-4 rounded font-mono transition-colors ${
-                  isActivePath('/dashboard') && !pathname?.includes('/dashboard/')
-                    ? 'bg-amber-500/20 text-amber-300'
-                    : 'text-amber-400/70 hover:bg-black/40 hover:text-amber-300'
-                }`}
-              >
-                Overview
-              </Link>
-            </li>
-            <li>
-              <Link
-                href="/dashboard/configuration"
-                className={`block py-2 px-4 rounded font-mono transition-colors ${
-                  isActivePath('/dashboard/configuration')
-                    ? 'bg-amber-500/20 text-amber-300'
-                    : 'text-amber-400/70 hover:bg-black/40 hover:text-amber-300'
-                }`}
-              >
-                Configuration
-              </Link>
-            </li>
-            <li>
-              <Link
-                href="/dashboard/console"
-                className={`block py-2 px-4 rounded font-mono transition-colors ${
-                  isActivePath('/dashboard/console')
-                    ? 'bg-amber-500/20 text-amber-300'
-                    : 'text-amber-400/70 hover:bg-black/40 hover:text-amber-300'
-                }`}
-              >
-                Console
-              </Link>
-            </li>
-            <li>
-              <Link
-                href="/dashboard/modules"
-                className={`block py-2 px-4 rounded font-mono transition-colors ${
-                  isActivePath('/dashboard/modules')
-                    ? 'bg-amber-500/20 text-amber-300'
-                    : 'text-amber-400/70 hover:bg-black/40 hover:text-amber-300'
-                }`}
-              >
-                Modules
-              </Link>
-            </li>
-            <li>
-              <Link
-                href="/dashboard/settings"
-                className={`block py-2 px-4 rounded font-mono transition-colors ${
-                  isActivePath('/dashboard/settings')
-                    ? 'bg-amber-500/20 text-amber-300'
-                    : 'text-amber-400/70 hover:bg-black/40 hover:text-amber-300'
-                }`}
-              >
-                Settings
-              </Link>
-            </li>
+        <nav className="flex-grow py-6 px-4 font-mono">
+          <ul className="space-y-1">
+            {[
+              { path: '', label: 'Overview', defaultActive: true },
+              { path: 'configuration', label: 'Configuration' },
+              { path: 'console', label: 'Console' },
+              { path: 'modules', label: 'Modules' },
+              { path: 'settings', label: 'Settings' }
+            ].map(item => {
+              const isActive = activeMenu === (item.path || 'overview');
+              return (
+                <li key={item.path || 'overview'}>
+                  <Link 
+                    href={`/dashboard${item.path ? `/${item.path}` : ''}`}
+                    className={`flex items-center px-3 py-2 rounded-md transition-all ${
+                      isActive 
+                        ? 'bg-amber-500/20 text-amber-300 border border-amber-500/30' 
+                        : 'text-amber-400/70 hover:bg-zinc-800 hover:text-amber-300'
+                    }`}
+                  >
+                    <span className="text-amber-400/90 mr-2">$</span>
+                    {item.label}
+                  </Link>
+                </li>
+              );
+            })}
           </ul>
         </nav>
-        
-        {/* Footer */}
-        <div className="p-4 border-t border-amber-500/20">
-          <div className="flex justify-between mb-4">
-            <button
-              type="button"
-              onClick={() => setShowDebugger(!showDebugger)}
-              className="text-amber-400/50 text-xs hover:text-amber-400 transition-colors"
-            >
-              {showDebugger ? 'Hide Debugger' : 'Show Debugger'}
-            </button>
-            <div className={`h-2 w-2 rounded-full ${
-              isConnected ? 'bg-green-500' : 'bg-red-500'
-            }`} />
+
+        {/* Update Indicator */}
+        {metrics?.version.updateAvailable && (
+          <div className="px-4 py-3 border-y border-amber-500/20 bg-amber-500/5">
+            <div className="flex items-center justify-between">
+              <div className="text-xs text-amber-400/90">
+                <span className="font-mono">Update Available</span>
+                <div className="text-[10px] text-amber-400/60 mt-0.5">
+                  v{metrics.version.current} → v{metrics.version.latest}
+                </div>
+              </div>
+              <button
+                type="button"
+                onClick={handleUpdate}
+                disabled={isUpdating}
+                className="px-2 py-1 bg-amber-500/20 text-amber-300 rounded text-xs hover:bg-amber-500/30 transition-colors flex items-center gap-1 disabled:opacity-50"
+              >
+                <svg xmlns="http://www.w3.org/2000/svg" className={`h-3 w-3 ${isUpdating ? 'animate-spin' : ''}`} viewBox="0 0 20 20" fill="currentColor" aria-labelledby="update-icon-title">
+                  <title id="update-icon-title">Update icon</title>
+                  <path fillRule="evenodd" d="M4 2a1 1 0 011 1v2.101a7.002 7.002 0 0111.601 2.566 1 1 0 11-1.885.666A5.002 5.002 0 005.999 7H9a1 1 0 010 2H4a1 1 0 01-1-1V3a1 1 0 011-1zm.008 9.057a1 1 0 011.276.61A5.002 5.002 0 0014.001 13H11a1 1 0 110-2h5a1 1 0 011 1v5a1 1 0 11-2 0v-2.101a7.002 7.002 0 01-11.601-2.566 1 1 0 01.61-1.276z" clipRule="evenodd" />
+                </svg>
+                {isUpdating ? 'Updating...' : 'Update'}
+              </button>
+            </div>
+            {metrics.version.updateInfo?.required && (
+              <div className="mt-2 text-[10px] text-red-400 bg-red-500/10 px-2 py-1 rounded">
+                ⚠️ Required Update
+              </div>
+            )}
           </div>
+        )}
+
+        {/* System Metrics */}
+        <div className="px-4 pt-4 pb-2">
+          <h3 className="text-amber-400/70 text-xs mb-3 border-b border-amber-500/20 pb-1">SYSTEM METRICS</h3>
+          
+          {/* RAM Usage */}
+          <div className="mb-3">
+            <div className="flex justify-between text-xs text-amber-400/90 mb-1">
+              <span>RAM</span>
+              <span>{ramPercentage}%</span>
+            </div>
+            <div className="h-1.5 bg-zinc-800 rounded-full overflow-hidden">
+              <div 
+                className={`h-full ${
+                  ramPercentage > 90 ? 'bg-red-500' : 
+                  ramPercentage > 70 ? 'bg-amber-500' : 'bg-green-500'
+                }`}
+                style={{ width: `${ramPercentage}%` }}
+              />
+            </div>
+            {metrics && (
+              <div className="text-[10px] text-amber-400/60 mt-1 text-right">
+                {formatBytes(metrics.memory.used)} / {formatBytes(metrics.memory.total)}
+              </div>
+            )}
+          </div>
+          
+          {/* CPU Usage */}
+          <div className="mb-3">
+            <div className="flex justify-between text-xs text-amber-400/90 mb-1">
+              <span>CPU</span>
+              <span>{cpuPercentage}%</span>
+            </div>
+            <div className="h-1.5 bg-zinc-800 rounded-full overflow-hidden">
+              <div 
+                className={`h-full ${
+                  cpuPercentage > 90 ? 'bg-red-500' : 
+                  cpuPercentage > 70 ? 'bg-amber-500' : 'bg-green-500'
+                }`}
+                style={{ width: `${cpuPercentage}%` }}
+              />
+            </div>
+            {metrics && (
+              <div className="text-[10px] text-amber-400/60 mt-1 text-right">
+                Load: {metrics.cpu.loadAvg[0].toFixed(2)} | Cores: {metrics.cpu.cores}
+              </div>
+            )}
+          </div>
+        </div>
+
+        {/* Logout button */}
+        <div className="p-4 border-t border-amber-500/20 mt-auto">
           <button
             type="button"
             onClick={handleLogout}
-            className="w-full py-2 px-4 bg-red-500/10 text-red-300 rounded hover:bg-red-500/20 transition-colors font-mono text-sm"
+            className="w-full py-2 px-4 bg-zinc-900/80 border border-red-500/30 text-red-400/90 hover:bg-zinc-800 rounded focus:outline-none focus:ring-2 focus:ring-red-500/40 focus:ring-offset-2 focus:ring-offset-black transition-all duration-200 font-mono text-sm flex items-center justify-center"
           >
-            Logout
+            <span className="mr-2">⬢</span>
+            <span>Logout</span>
           </button>
         </div>
       </div>
-      
-      {/* Main Content */}
-      <div className="flex-grow overflow-auto">
-        {/* Socket Debugger (conditionally rendered) */}
-        {showDebugger && (
-          <div className="border-b border-amber-500/20 bg-black/80">
-            <SocketDebugger />
-          </div>
-        )}
-        
-        {/* Page Content */}
+
+      {/* Main content */}
+      <div className="flex-1 overflow-hidden">
         {children}
       </div>
+      
+      {/* Debug components */}
+      <SocketDebugger />
     </div>
   );
 } 
