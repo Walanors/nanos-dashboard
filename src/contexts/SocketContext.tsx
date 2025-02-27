@@ -43,6 +43,24 @@ interface FileListResult {
   modified: Date;
 }
 
+interface ServerStatus {
+  running: boolean;
+  pid?: number;
+  uptime?: number;
+  configPath?: string;
+}
+
+interface ServerCommandResult {
+  success: boolean;
+  message: string;
+  error?: string;
+}
+
+interface LogData {
+  type: 'initial' | 'update';
+  logs: string[];
+}
+
 interface SocketResponse<T> {
   success: boolean;
   result?: T;
@@ -69,6 +87,20 @@ interface SocketContextType {
   writeFile: (path: string, content: string) => Promise<void>;
   listFiles: (dirPath: string) => Promise<FileListResult[]>;
   connectionState: ConnectionState;
+  // Server management
+  serverStatus: ServerStatus | null;
+  isLoadingServerStatus: boolean;
+  fetchServerStatus: () => Promise<ServerStatus>;
+  startServer: () => Promise<ServerCommandResult>;
+  stopServer: () => Promise<ServerCommandResult>;
+  sendServerCommand: (command: string) => Promise<ServerCommandResult>;
+  // Logs
+  logs: string[];
+  isSubscribedToLogs: boolean;
+  isLoadingLogs: boolean;
+  subscribeToLogs: (options?: { initialLines?: number; fullHistory?: boolean }) => Promise<void>;
+  unsubscribeFromLogs: () => void;
+  clearLogs: () => void;
 }
 
 // Create context with default values
@@ -89,7 +121,21 @@ const SocketContext = createContext<SocketContextType>({
     error: null,
     reconnectCount: 0,
     lastConnectAttempt: null
-  }
+  },
+  // Server management
+  serverStatus: null,
+  isLoadingServerStatus: false,
+  fetchServerStatus: () => Promise.reject(new Error('Socket not initialized')),
+  startServer: () => Promise.reject(new Error('Socket not initialized')),
+  stopServer: () => Promise.reject(new Error('Socket not initialized')),
+  sendServerCommand: () => Promise.reject(new Error('Socket not initialized')),
+  // Logs
+  logs: [],
+  isSubscribedToLogs: false,
+  isLoadingLogs: false,
+  subscribeToLogs: () => Promise.reject(new Error('Socket not initialized')),
+  unsubscribeFromLogs: () => {},
+  clearLogs: () => {}
 });
 
 // Provider component
@@ -104,6 +150,16 @@ export function SocketProvider({ children }: { children: ReactNode }) {
     lastConnectAttempt: null
   });
   const [credentialsBase64, setCredentialsBase64] = useState<string | null>(null);
+  
+  // Server management state
+  const [serverStatus, setServerStatus] = useState<ServerStatus | null>(null);
+  const [isLoadingServerStatus, setIsLoadingServerStatus] = useState<boolean>(false);
+  
+  // Log state
+  const [logs, setLogs] = useState<string[]>([]);
+  const [isSubscribedToLogs, setIsSubscribedToLogs] = useState<boolean>(false);
+  const [isLoadingLogs, setIsLoadingLogs] = useState<boolean>(false);
+  const maxLogLines = 1000; // Prevent memory issues by limiting stored logs
 
   // Helper function to log connection state changes
   const logConnectionEvent = useCallback((event: string, details?: Record<string, unknown>) => {
@@ -505,6 +561,255 @@ export function SocketProvider({ children }: { children: ReactNode }) {
     });
   }, [socket, connectionState.connected]);
 
+  // Server management functions
+  const fetchServerStatus = useCallback((): Promise<ServerStatus> => {
+    return new Promise((resolve, reject) => {
+      if (!socket || !connectionState.connected) {
+        reject(new Error('Socket not connected'));
+        return;
+      }
+      
+      setIsLoadingServerStatus(true);
+      
+      const timeoutId = setTimeout(() => {
+        setIsLoadingServerStatus(false);
+        reject(new Error('Server status request timed out'));
+      }, 10000);
+      
+      socket.emit('server_status', (response: { 
+        success: boolean;
+        running?: boolean;
+        pid?: number;
+        uptime?: number;
+        configPath?: string;
+        error?: string;
+      }) => {
+        clearTimeout(timeoutId);
+        setIsLoadingServerStatus(false);
+        
+        if (response.success) {
+          const status: ServerStatus = {
+            running: !!response.running,
+            pid: response.pid,
+            uptime: response.uptime,
+            configPath: response.configPath
+          };
+          setServerStatus(status);
+          resolve(status);
+        } else {
+          reject(new Error(response.error || 'Failed to get server status'));
+        }
+      });
+    });
+  }, [socket, connectionState.connected]);
+  
+  const startServer = useCallback((): Promise<ServerCommandResult> => {
+    return new Promise((resolve, reject) => {
+      if (!socket || !connectionState.connected) {
+        reject(new Error('Socket not connected'));
+        return;
+      }
+      
+      const timeoutId = setTimeout(() => {
+        reject(new Error('Server start request timed out'));
+      }, 30000);
+      
+      socket.emit('server_start', (response: {
+        success: boolean;
+        message?: string;
+        running?: boolean;
+        pid?: number;
+        error?: string;
+      }) => {
+        clearTimeout(timeoutId);
+        
+        if (response.success) {
+          // Update server status if available
+          if (response.running !== undefined) {
+            setServerStatus(prev => {
+              if (!prev) return {
+                running: !!response.running,
+                pid: response.pid
+              };
+              return {
+                ...prev,
+                running: !!response.running,
+                pid: response.pid
+              };
+            });
+          }
+          
+          resolve({
+            success: true,
+            message: response.message || 'Server started successfully'
+          });
+        } else {
+          reject(new Error(response.error || response.message || 'Failed to start server'));
+        }
+      });
+    });
+  }, [socket, connectionState.connected]);
+  
+  const stopServer = useCallback((): Promise<ServerCommandResult> => {
+    return new Promise((resolve, reject) => {
+      if (!socket || !connectionState.connected) {
+        reject(new Error('Socket not connected'));
+        return;
+      }
+      
+      const timeoutId = setTimeout(() => {
+        reject(new Error('Server stop request timed out'));
+      }, 30000);
+      
+      socket.emit('server_stop', (response: {
+        success: boolean;
+        message?: string;
+        running?: boolean;
+        error?: string;
+      }) => {
+        clearTimeout(timeoutId);
+        
+        if (response.success) {
+          // Update server status if available
+          if (response.running !== undefined) {
+            setServerStatus(prev => {
+              if (!prev) return {
+                running: !!response.running
+              };
+              return {
+                ...prev,
+                running: !!response.running,
+                pid: undefined,
+                uptime: undefined
+              };
+            });
+          }
+          
+          resolve({
+            success: true,
+            message: response.message || 'Server stopped successfully'
+          });
+        } else {
+          reject(new Error(response.error || response.message || 'Failed to stop server'));
+        }
+      });
+    });
+  }, [socket, connectionState.connected]);
+  
+  const sendServerCommand = useCallback((command: string): Promise<ServerCommandResult> => {
+    return new Promise((resolve, reject) => {
+      if (!socket || !connectionState.connected) {
+        reject(new Error('Socket not connected'));
+        return;
+      }
+      
+      if (!command || typeof command !== 'string') {
+        reject(new Error('Invalid command'));
+        return;
+      }
+      
+      const timeoutId = setTimeout(() => {
+        reject(new Error('Server command request timed out'));
+      }, 10000);
+      
+      socket.emit('server_command', command, (response: {
+        success: boolean;
+        message?: string;
+        error?: string;
+      }) => {
+        clearTimeout(timeoutId);
+        
+        if (response.success) {
+          resolve({
+            success: true,
+            message: response.message || 'Command sent successfully'
+          });
+        } else {
+          reject(new Error(response.error || response.message || 'Failed to send command'));
+        }
+      });
+    });
+  }, [socket, connectionState.connected]);
+
+  // Log functions
+  const clearLogs = useCallback(() => {
+    setLogs([]);
+  }, []);
+  
+  const handleLogData = useCallback((data: LogData) => {
+    if (!data || !data.logs) return;
+    
+    setLogs(prevLogs => {
+      if (data.type === 'initial') {
+        // Replace logs with initial data
+        return data.logs.filter(Boolean);
+      }
+      
+      // Add new logs while respecting the max limit
+      const newLogs = [...prevLogs, ...data.logs.filter(Boolean)];
+      return newLogs.slice(-maxLogLines);
+    });
+  }, []);
+  
+  const subscribeToLogs = useCallback((options: { initialLines?: number; fullHistory?: boolean } = {}): Promise<void> => {
+    return new Promise((resolve, reject) => {
+      if (!socket || !connectionState.connected) {
+        reject(new Error('Socket not connected'));
+        return;
+      }
+      
+      // Clean up any existing subscription first
+      unsubscribeFromLogs();
+      
+      setIsLoadingLogs(true);
+      
+      // Set up event listener for log data
+      socket.on('log_data', handleLogData);
+      
+      // Subscribe to logs
+      socket.emit('subscribe_logs', options, (response: {
+        success: boolean;
+        message?: string;
+        error?: string;
+      }) => {
+        setIsLoadingLogs(false);
+        
+        if (response.success) {
+          setIsSubscribedToLogs(true);
+          resolve();
+        } else {
+          socket.off('log_data');
+          setIsSubscribedToLogs(false);
+          reject(new Error(response.error || response.message || 'Failed to subscribe to logs'));
+        }
+      });
+    });
+  }, [socket, connectionState.connected, handleLogData]);
+  
+  const unsubscribeFromLogs = useCallback(() => {
+    if (socket) {
+      socket.off('log_data');
+      socket.emit('unsubscribe_logs');
+      setIsSubscribedToLogs(false);
+    }
+  }, [socket]);
+
+  // Effect to check server status when socket connects
+  useEffect(() => {
+    if (socket && connectionState.connected) {
+      fetchServerStatus().catch(error => {
+        console.error('Error fetching initial server status:', error);
+      });
+    }
+  }, [socket, connectionState.connected, fetchServerStatus]);
+
+  // Clean up logs subscription on unmount
+  useEffect(() => {
+    return () => {
+      unsubscribeFromLogs();
+    };
+  }, [unsubscribeFromLogs]);
+
   // Context value
   const value = {
     socket,
@@ -517,7 +822,21 @@ export function SocketProvider({ children }: { children: ReactNode }) {
     readFile,
     writeFile,
     listFiles,
-    connectionState
+    connectionState,
+    // Server management
+    serverStatus,
+    isLoadingServerStatus,
+    fetchServerStatus,
+    startServer,
+    stopServer,
+    sendServerCommand,
+    // Logs
+    logs,
+    isSubscribedToLogs,
+    isLoadingLogs,
+    subscribeToLogs,
+    unsubscribeFromLogs,
+    clearLogs
   };
 
   return (
