@@ -3,7 +3,6 @@
 import React, { useState, useEffect, useRef, useCallback, useMemo } from 'react';
 import { toast } from 'react-hot-toast';
 import { NANOS_INSTALL_DIR } from './NanosOnboarding';
-import * as nodePath from 'node:path';
 
 // Define types
 interface FileEntry {
@@ -17,6 +16,17 @@ interface FileEntry {
 interface DirectoryContents {
   files: FileEntry[];
 }
+
+// Path utilities (browser compatible)
+const pathUtils = {
+  dirname: (path: string): string => {
+    const lastSlashIndex = path.lastIndexOf('/');
+    return lastSlashIndex === -1 ? path : path.substring(0, lastSlashIndex);
+  },
+  join: (...parts: string[]): string => {
+    return parts.map(part => part.replace(/^\/+|\/+$/g, '')).join('/');
+  }
+};
 
 export default function FileManager() {
   const [currentTab, setCurrentTab] = useState<'packages' | 'assets'>('packages');
@@ -335,7 +345,7 @@ export default function FileManager() {
     setIsMoving(true);
 
     // Get parent directory path
-    const parentPath = nodePath.dirname(currentPath);
+    const parentPath = pathUtils.dirname(currentPath);
 
     try {
       // Create a new endpoint for moving files
