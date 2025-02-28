@@ -139,6 +139,17 @@ export default function DashboardLayout({
     }
   };
 
+  // Check if user is authenticated and redirect if not
+  useEffect(() => {
+    // Check if user is authenticated
+    const credentials = sessionStorage.getItem('credentials');
+    
+    if (!credentials && !userLoading) {
+      console.log('No credentials found, redirecting to login');
+      router.push('/');
+    }
+  }, [router, userLoading]);
+
   // Only show loading state for initial connection or user loading
   // Don't show loading state if user was previously connected (they're just reconnecting)
   if ((userLoading || (!isConnected && !wasConnected && (isConnecting || connectionAttempts < 5)))) {
