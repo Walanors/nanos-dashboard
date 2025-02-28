@@ -101,32 +101,38 @@ export default function DashboardLayout({
   // Use the actual CPU usage instead of load average
   const cpuPercentage = metrics ? Math.round(metrics.cpu.usage) : 0;
 
-  // Handle update function
+  // Handle update function with increased timeouts
   const handleUpdate = async () => {
     if (!executeCommand) return;
     
     setIsUpdating(true);
     try {
-      // Execute git pull to update the codebase
-      const result = await executeCommand('sudo git pull');
+      toast.success('Starting update process. This may take a few minutes...', { duration: 10000 });
+      
+      // Execute git pull to update the codebase with increased timeout
+      const result = await executeCommand('sudo git pull', { timeout: 60000 }); // 60 second timeout
       if (result.error) {
         throw new Error(result.error);
       }
+      toast.success('Code updated. Installing dependencies...', { duration: 5000 });
 
-      // Install all dependencies including dev dependencies with sudo
-      const installPackages = await executeCommand('sudo npm install --include=dev');
+      // Install all dependencies including dev dependencies with sudo with increased timeout
+      const installPackages = await executeCommand('sudo npm install --include=dev', { timeout: 300000 }); // 5 minute timeout
       if (installPackages.error) {
         throw new Error(installPackages.error);
       }
+      toast.success('Dependencies installed. Building application...', { duration: 5000 });
       
-      // Rebuild the application after update with sudo
-      const buildResult = await executeCommand('sudo npm run build');
+      // Rebuild the application after update with sudo with increased timeout
+      const buildResult = await executeCommand('sudo npm run build', { timeout: 300000 }); // 5 minute timeout
       if (buildResult.error) {
         throw new Error(buildResult.error);
       }
+      
       toast.success('Update installed successfully. The service will restart momentarily. You will be able to refresh the page to see the changes.');
-      // Restart the service
-      const restartResult = await executeCommand('sudo systemctl restart nanos-dashboard.service');
+      
+      // Restart the service with increased timeout
+      const restartResult = await executeCommand('sudo systemctl restart nanos-dashboard.service', { timeout: 60000 }); // 60 second timeout
       if (restartResult.error) {
         throw new Error(restartResult.error);
       }

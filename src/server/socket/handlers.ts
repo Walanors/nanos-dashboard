@@ -325,7 +325,30 @@ export function configureSocketHandlers(io: Server): void {
     metricsIntervals.set(userSocket.id, metricsInterval);
 
     // Handle command execution
-    userSocket.on('execute_command', async (command: string, callback: SocketCallback<CommandResponse>) => {
+    userSocket.on('execute_command', async (commandOrOptions: string | { command: string, timeout?: number }, callbackOrOptions: SocketCallback<CommandResponse> | { timeout?: number }, maybeCallback?: SocketCallback<CommandResponse>) => {
+      // Handle different parameter patterns
+      let command: string;
+      let timeout: number | undefined;
+      let callback: SocketCallback<CommandResponse>;
+      
+      if (typeof commandOrOptions === 'string') {
+        command = commandOrOptions;
+        
+        if (typeof callbackOrOptions === 'function') {
+          // Old style: (command, callback)
+          callback = callbackOrOptions;
+        } else {
+          // New style: (command, options, callback)
+          timeout = callbackOrOptions?.timeout;
+          callback = maybeCallback as SocketCallback<CommandResponse>;
+        }
+      } else {
+        // Object style: ({ command, timeout }, callback)
+        command = commandOrOptions.command;
+        timeout = commandOrOptions.timeout;
+        callback = callbackOrOptions as SocketCallback<CommandResponse>;
+      }
+      
       try {
         console.log(`Executing command: ${command} by ${userSocket.data.user.username}`);
         
@@ -335,12 +358,14 @@ export function configureSocketHandlers(io: Server): void {
         }
 
         // Set the correct working directory and shell options
-        const options = {
+        const execOptions = {
           cwd: process.cwd(),
-          shell: process.platform === 'win32' ? 'powershell.exe' : '/bin/bash'
+          shell: process.platform === 'win32' ? 'powershell.exe' : '/bin/bash',
+          timeout: timeout || 300000 // Use client timeout or default to 5 minutes
         };
 
-        const { stdout, stderr } = await execPromise(command, options);
+        console.log(`Executing command with timeout: ${execOptions.timeout}ms`);
+        const { stdout, stderr } = await execPromise(command, execOptions);
         
         const response: CommandResponse = {
           success: true,

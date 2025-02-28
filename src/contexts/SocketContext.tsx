@@ -88,7 +88,7 @@ interface SocketContextType {
   connectionError: string | null;
   metrics: SystemMetrics | null;
   reconnect: () => void;
-  executeCommand: (command: string) => Promise<CommandResult>;
+  executeCommand: (command: string, options?: { timeout?: number }) => Promise<CommandResult>;
   readFile: (path: string) => Promise<string>;
   writeFile: (path: string, content: string) => Promise<void>;
   listFiles: (dirPath: string) => Promise<FileListResult[]>;
@@ -477,7 +477,7 @@ export function SocketProvider({ children }: { children: ReactNode }) {
   }, [credentialsBase64, initializeSocket, socket, logConnectionEvent]);
 
   // Execute command via socket
-  const executeCommand = useCallback((command: string): Promise<CommandResult> => {
+  const executeCommand = useCallback((command: string, options?: { timeout?: number }): Promise<CommandResult> => {
     return new Promise((resolve, reject) => {
       if (!socket || !connectionState.connected) {
         reject(new Error('Socket not connected'));
@@ -485,11 +485,13 @@ export function SocketProvider({ children }: { children: ReactNode }) {
       }
       
       // Set a timeout for the command execution
+      const timeoutDuration = options?.timeout || 30000; // Default 30 second timeout
       const timeoutId = setTimeout(() => {
         reject(new Error('Command execution timed out'));
-      }, 30000); // 30 second timeout
+      }, timeoutDuration);
       
-      socket.emit('execute_command', command, (response: SocketResponse<CommandResult>) => {
+      // Pass the timeout to the server as well
+      socket.emit('execute_command', command, { timeout: timeoutDuration }, (response: SocketResponse<CommandResult>) => {
         clearTimeout(timeoutId);
         if (response.success) {
           resolve(response.result || { output: 'Command executed successfully' });
