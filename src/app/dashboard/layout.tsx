@@ -23,22 +23,54 @@ export default function DashboardLayout({
   const [isUpdating, setIsUpdating] = useState(false);
   const [connectionAttempts, setConnectionAttempts] = useState(0);
   const [showRetryButton, setShowRetryButton] = useState(false);
+  const [wasConnected, setWasConnected] = useState(false);
+
+  // Track if the user was previously connected
+  useEffect(() => {
+    if (isConnected) {
+      setWasConnected(true);
+    }
+  }, [isConnected]);
 
   // Set up a timer to show retry button after multiple connection attempts
   useEffect(() => {
+    // Only increment connection attempts if we're actively trying to connect
     if (isConnecting && !isConnected) {
-      setConnectionAttempts(prev => prev + 1);
+      // Use a timeout to avoid incrementing too quickly
+      const timer = setTimeout(() => {
+        setConnectionAttempts(prev => prev + 1);
+        
+        // After 3 attempts, show the retry button
+        if (connectionAttempts >= 3) {
+          setShowRetryButton(true);
+        }
+      }, 2000); // Wait 2 seconds before counting as an attempt
       
-      // After 3 attempts, show the retry button
-      if (connectionAttempts >= 3) {
-        setShowRetryButton(true);
-      }
-    } else if (isConnected) {
-      // Reset when connected
+      return () => clearTimeout(timer);
+    }
+    
+    // Reset when connected
+    if (isConnected) {
       setConnectionAttempts(0);
       setShowRetryButton(false);
     }
   }, [isConnecting, isConnected, connectionAttempts]);
+
+  // Auto-reconnect when page becomes visible again
+  useEffect(() => {
+    const handleVisibilityChange = () => {
+      if (document.visibilityState === 'visible' && !isConnected && wasConnected) {
+        console.log('Page became visible again, attempting reconnection');
+        reconnect();
+      }
+    };
+
+    document.addEventListener('visibilitychange', handleVisibilityChange);
+    
+    return () => {
+      document.removeEventListener('visibilitychange', handleVisibilityChange);
+    };
+  }, [isConnected, reconnect, wasConnected]);
 
   // Format bytes to human-readable size
   const formatBytes = (bytes: number): string => {
@@ -107,8 +139,9 @@ export default function DashboardLayout({
     }
   };
 
-  // Show loading state for either user loading or waiting for socket connection
-  if (userLoading || (!isConnected && (isConnecting || connectionAttempts < 3))) {
+  // Only show loading state for initial connection or user loading
+  // Don't show loading state if user was previously connected (they're just reconnecting)
+  if ((userLoading || (!isConnected && !wasConnected && (isConnecting || connectionAttempts < 5)))) {
     return (
       <div className="flex flex-col min-h-screen items-center justify-center bg-gradient-to-br from-black to-zinc-900">
         <div className="animate-pulse text-amber-400 text-lg font-mono mb-4">
@@ -129,8 +162,18 @@ export default function DashboardLayout({
           <button
             type="button"
             onClick={() => {
+              // Force a complete reconnection
               reconnect();
+              // Reset the counter but don't hide the button immediately
+              // to avoid flickering if reconnection fails quickly
               setConnectionAttempts(0);
+              
+              // Force a page refresh if this is after initial login
+              // This ensures we get a completely fresh connection
+              if (sessionStorage.getItem('justLoggedIn') === 'true') {
+                sessionStorage.removeItem('justLoggedIn');
+                window.location.reload();
+              }
             }}
             className="mt-6 px-4 py-2 bg-amber-500/20 text-amber-300 rounded-md hover:bg-amber-500/30 transition-colors font-mono text-sm"
           >
@@ -142,7 +185,8 @@ export default function DashboardLayout({
   }
 
   // Show connection error state if we've tried multiple times and still failed
-  if (!isConnected && connectionAttempts >= 3) {
+  // But only for initial connection, not for reconnection
+  if (!isConnected && !wasConnected && connectionAttempts >= 3) {
     return (
       <div className="flex flex-col min-h-screen items-center justify-center bg-gradient-to-br from-black to-zinc-900">
         <div className="text-red-400 text-lg font-mono mb-4">
@@ -196,7 +240,6 @@ export default function DashboardLayout({
             <div className="text-xl font-bold text-amber-400">
               nanos_dashboard
             </div>
-
           </div>
         </div>
 
@@ -228,6 +271,22 @@ export default function DashboardLayout({
             })}
           </ul>
         </nav>
+
+        {/* Connection status indicator for reconnection */}
+        {!isConnected && wasConnected && (
+          <div className="px-4 py-2 border-t border-amber-500/20 bg-red-900/20">
+            <div className="flex items-center justify-between">
+              <div className="text-xs text-red-400 font-mono">Connection Lost</div>
+              <button
+                type="button"
+                onClick={reconnect}
+                className="px-2 py-1 bg-amber-500/20 text-amber-300 rounded text-xs hover:bg-amber-500/30 transition-colors"
+              >
+                Reconnect
+              </button>
+            </div>
+          </div>
+        )}
 
         {/* Update Indicator */}
         {metrics?.version.updateAvailable && (
@@ -353,4 +412,4 @@ export default function DashboardLayout({
       <SocketDebugger />
     </div>
   );
-} 
+}

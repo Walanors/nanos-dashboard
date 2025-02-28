@@ -63,6 +63,10 @@ export default function LoginPage() {
         // Store credentials in sessionStorage (not secure for production)
         sessionStorage.setItem('credentials', credentials);
         
+        // Set a flag to indicate this is a fresh login
+        // This helps the dashboard handle the initial connection more robustly
+        sessionStorage.setItem('justLoggedIn', 'true');
+        
         // Redirect to dashboard
         router.push('/dashboard');
       } else {
