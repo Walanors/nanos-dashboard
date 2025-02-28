@@ -44,9 +44,9 @@ export default function ServerPage() {
   const [terminalReady, setTerminalReady] = useState(false);
   const logsLengthRef = useRef(logs.length);
 
-  // Initialize xterm.js terminal
+  // Initialize xterm.js terminal - only initialize once and keep it alive
   useEffect(() => {
-    if (!terminalRef.current || xtermRef.current || activeTab !== 'management') return;
+    if (!terminalRef.current || xtermRef.current) return;
 
     // Create terminal instance
     const terminal = new Terminal({
@@ -165,25 +165,25 @@ export default function ServerPage() {
     
     setTerminalReady(true);
     
-    // Clean up on unmount
+    // Clean up only on unmount, not on tab change
     return () => {
       terminal.dispose();
       xtermRef.current = null;
       fitAddonRef.current = null;
     };
-  }, [activeTab]);
+  }, []); // Empty dependency array means this only runs once on mount
   
-  // Handle window resize
+  // Handle window resize - resize terminal regardless of active tab
   useEffect(() => {
     const handleResize = () => {
-      if (fitAddonRef.current && activeTab === 'management') {
+      if (fitAddonRef.current) {
         fitAddonRef.current.fit();
       }
     };
     
     window.addEventListener('resize', handleResize);
     return () => window.removeEventListener('resize', handleResize);
-  }, [activeTab]);
+  }, []);
   
   // Handle terminal command execution
   const handleTerminalCommand = async (cmd: string) => {
@@ -260,9 +260,9 @@ export default function ServerPage() {
     }
   };
 
-  // Subscribe to logs when component mounts and when active tab is management
+  // Subscribe to logs when component mounts - keep subscription active regardless of tab
   useEffect(() => {
-    if (activeTab === 'management' && !isSubscribedToLogs) {
+    if (!isSubscribedToLogs) {
       console.log('Subscribing to server logs');
       // Subscribe with a smaller batch size for more frequent updates
       subscribeToLogs({ 
@@ -284,18 +284,18 @@ export default function ServerPage() {
         });
     }
     
-    // Clean up subscription when switching away from management tab or unmounting
-    return () => {
-      if (activeTab !== 'management' && isSubscribedToLogs) {
-        console.log('Unsubscribing from server logs');
-        unsubscribeFromLogs();
-      }
-    };
-  }, [activeTab, isSubscribedToLogs, subscribeToLogs, unsubscribeFromLogs]);
+  // Clean up subscription only when unmounting, not when switching tabs
+  return () => {
+    if (isSubscribedToLogs) {
+      console.log('Unsubscribing from server logs on unmount');
+      unsubscribeFromLogs();
+    }
+  };
+}, [isSubscribedToLogs, subscribeToLogs, unsubscribeFromLogs]);
 
-  // Update terminal with new logs
+  // Update terminal with new logs - update regardless of active tab
   useEffect(() => {
-    if (xtermRef.current && terminalReady && logs.length > 0 && activeTab === 'management') {
+    if (xtermRef.current && terminalReady && logs.length > 0) {
       // Get only new logs since last update
       const lastLogIndex = logsLengthRef.current;
       const newLogs = logs.slice(lastLogIndex);
@@ -340,7 +340,7 @@ export default function ServerPage() {
     
     // Update logs length reference
     logsLengthRef.current = logs.length;
-  }, [logs, terminalReady, activeTab]);
+  }, [logs, terminalReady]);
 
   // Refresh server status periodically
   useEffect(() => {
@@ -647,4 +647,4 @@ export default function ServerPage() {
       )}
     </div>
   );
-} 
+}
